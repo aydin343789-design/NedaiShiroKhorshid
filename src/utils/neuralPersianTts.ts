@@ -83,29 +83,29 @@ interface CharacterProfile {
 const CHARACTER_PROFILES: Record<CharacterId, CharacterProfile> = {
   female: {
     model: 'mana',
-    speechRate: 1.01,
-    semitones: 0.2,
+    speechRate: 0.82,
+    semitones: 0.1,
     lowShelfDb: -0.5,
     highShelfDb: 1.2,
   },
   male: {
     model: 'amir',
-    speechRate: 0.98,
-    semitones: -0.5,
+    speechRate: 0.80,
+    semitones: -0.6,
     lowShelfDb: 1.4,
     highShelfDb: -0.5,
   },
   child: {
     model: 'gyro',
-    speechRate: 0.91,
-    semitones: 2.8,
+    speechRate: 0.58,
+    semitones: 3.4,
     lowShelfDb: -2.0,
     highShelfDb: 2.8,
   },
   narrator: {
     model: 'amir',
-    speechRate: 0.79,
-    semitones: -2.8,
+    speechRate: 0.58,
+    semitones: -3.4,
     lowShelfDb: 3.8,
     highShelfDb: -2.0,
   },
@@ -119,6 +119,8 @@ interface ToneProfile {
   lowShelfDb: number;
   highShelfDb: number;
   reverbMix: number;
+  pauseMs: number;
+  breathMs: number;
 }
 
 /**
@@ -128,58 +130,70 @@ interface ToneProfile {
  */
 const TONE_PROFILES: Record<ToneId, ToneProfile> = {
   cheerful: {
-    inferenceRate: 0.94,
-    noiseScale: 1.16,
-    noiseWidth: 1.1,
-    semitones: 1.5,
-    lowShelfDb: -0.8,
-    highShelfDb: 2.2,
+    inferenceRate: 0.82,
+    noiseScale: 1.12,
+    noiseWidth: 1.08,
+    semitones: 2.0,
+    lowShelfDb: -1.0,
+    highShelfDb: 3.0,
     reverbMix: 0,
+    pauseMs: 220,
+    breathMs: 80,
   },
   intimate: {
-    inferenceRate: 0.84,
-    noiseScale: 0.78,
-    noiseWidth: 0.74,
-    semitones: -0.4,
-    lowShelfDb: 1.4,
-    highShelfDb: -1.3,
+    inferenceRate: 0.72,
+    noiseScale: 0.76,
+    noiseWidth: 0.70,
+    semitones: -1.0,
+    lowShelfDb: 2.0,
+    highShelfDb: -1.8,
     reverbMix: 0.015,
+    pauseMs: 360,
+    breathMs: 130,
   },
   sad: {
-    inferenceRate: 0.72,
-    noiseScale: 0.64,
-    noiseWidth: 0.58,
-    semitones: -1.6,
-    lowShelfDb: 1.8,
-    highShelfDb: -3.0,
+    inferenceRate: 0.62,
+    noiseScale: 0.60,
+    noiseWidth: 0.54,
+    semitones: -2.5,
+    lowShelfDb: 2.4,
+    highShelfDb: -3.6,
     reverbMix: 0.025,
+    pauseMs: 520,
+    breathMs: 180,
   },
   formal: {
-    inferenceRate: 0.86,
+    inferenceRate: 0.74,
     noiseScale: 0.74,
     noiseWidth: 0.76,
-    semitones: 0,
+    semitones: -0.3,
     lowShelfDb: 0,
     highShelfDb: 0,
     reverbMix: 0,
+    pauseMs: 400,
+    breathMs: 120,
   },
   professional: {
-    inferenceRate: 0.9,
+    inferenceRate: 0.80,
     noiseScale: 0.86,
     noiseWidth: 0.82,
     semitones: 0.2,
     lowShelfDb: 0.35,
     highShelfDb: 0.65,
     reverbMix: 0,
+    pauseMs: 280,
+    breathMs: 90,
   },
   epic: {
-    inferenceRate: 0.76,
+    inferenceRate: 0.64,
     noiseScale: 1.08,
     noiseWidth: 1.08,
-    semitones: -1.5,
-    lowShelfDb: 2.8,
-    highShelfDb: -1.0,
+    semitones: -2.0,
+    lowShelfDb: 3.2,
+    highShelfDb: -1.4,
     reverbMix: 0.045,
+    pauseMs: 460,
+    breathMs: 150,
   },
 };
 
@@ -409,8 +423,10 @@ async function loadVoice(id: VoiceModelId): Promise<LoadedVoice> {
   return activeVoice;
 }
 
-function splitTextForPiper(text: string, maxLength = 260): string[] {
-  const sentences = text.match(/[^.!؟!…]+[.!؟!…]*/g) || [text];
+function splitTextForPiper(text: string, maxLength = 220): string[] {
+  // Keep clause punctuation in its own inference chunk. Piper otherwise tends
+  // to run through Persian commas with almost no audible pause.
+  const sentences = text.match(/[^.!؟!…،؛,:]+[.!؟!…،؛,:]*/g) || [text];
   const chunks: string[] = [];
   let current = '';
 
@@ -551,8 +567,8 @@ async function synthesizeChunk(
   return pcm;
 }
 
-function joinPcm(chunks: Float32Array[], sampleRate: number): Float32Array {
-  const gap = Math.floor(sampleRate * 0.12);
+function joinPcm(chunks: Float32Array[], sampleRate: number, tone: ToneProfile): Float32Array {
+  const gap = Math.floor(sampleRate * (tone.pauseMs / 1000));
   const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0) + Math.max(0, chunks.length - 1) * gap;
   const merged = new Float32Array(total);
   let offset = 0;
@@ -697,7 +713,7 @@ export async function synthesizePersianNeuralAudio(
     total: chunks.length + 1,
     message: 'پردازش لحن و ساخت فایل MP3…',
   });
-  const merged = joinPcm(pcmChunks, voice.config.audio.sample_rate);
+  const merged = joinPcm(pcmChunks, voice.config.audio.sample_rate, tone);
   const styled = await renderStyle(merged, voice.config.audio.sample_rate, character, tone, userPitch);
   const blob = await audioBufferToMp3(styled);
 

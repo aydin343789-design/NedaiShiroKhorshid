@@ -18,6 +18,6 @@ run('npx', ['capacitor-assets', 'generate', '--android', '--assetPath', 'resourc
 
 const gradleFile = 'android/app/build.gradle';
 let gradle = readFileSync(gradleFile, 'utf8');
-gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode 2');
-gradle = gradle.replace(/versionName\s+"[^"]+"/, 'versionName "1.1.0"');
+gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode 3');
+gradle = gradle.replace(/versionName\s+"[^"]+"/, 'versionName "1.2.0"');
 writeFileSync(gradleFile, gradle);

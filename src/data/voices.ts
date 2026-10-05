@@ -15,6 +15,7 @@ export interface ToneItem {
   id: 'cheerful' | 'intimate' | 'sad' | 'formal' | 'professional' | 'epic';
   name: string;
   iconName: string;
+  description: string;
 }
 
 export const CHARACTERS: CharacterItem[] = [
@@ -49,12 +50,12 @@ export const CHARACTERS: CharacterItem[] = [
 ];
 
 export const TONES: ToneItem[] = [
-  { id: 'cheerful', name: 'شاد', iconName: 'smile' },
-  { id: 'intimate', name: 'صمیمی', iconName: 'heart' },
-  { id: 'sad', name: 'غمگین', iconName: 'cloud-rain' },
-  { id: 'formal', name: 'رسمی', iconName: 'newspaper' },
-  { id: 'professional', name: 'حرفه‌ای', iconName: 'briefcase' },
-  { id: 'epic', name: 'حماسی', iconName: 'sparkles' },
+  { id: 'cheerful', name: 'شاد', iconName: 'smile', description: 'روشن، پرانرژی و لبخنددار' },
+  { id: 'intimate', name: 'صمیمی', iconName: 'heart', description: 'نرم، نزدیک و دوستانه' },
+  { id: 'sad', name: 'غمگین', iconName: 'cloud-rain', description: 'آرام، سنگین و احساسی' },
+  { id: 'formal', name: 'رسمی', iconName: 'newspaper', description: 'منظم، شمرده و اداری' },
+  { id: 'professional', name: 'حرفه‌ای', iconName: 'briefcase', description: 'شفاف، مطمئن و ارائه‌ای' },
+  { id: 'epic', name: 'حماسی', iconName: 'sparkles', description: 'باشکوه، عمیق و قدرتمند' },
 ];
 
 // Single sample text as requested

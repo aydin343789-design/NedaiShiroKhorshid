@@ -366,6 +366,7 @@ export default function App() {
                   key={tone.id}
                   type="button"
                   onClick={() => setSelectedTone(tone.id)}
+                  title={tone.description}
                   className={`flex items-center justify-center gap-1 rounded-xl py-1.5 px-2 text-center text-xs font-medium transition-all ${
                     isSelected
                       ? 'border-2 border-amber-500 bg-amber-500/20 text-amber-300 font-bold shadow-sm'
@@ -415,10 +416,20 @@ export default function App() {
               placeholder="متن خود را اینجا بنویسید..."
               className="h-full w-full resize-none bg-transparent text-xs sm:text-sm leading-relaxed text-slate-100 placeholder-slate-600 outline-none"
             />
+            <span className="pointer-events-none absolute bottom-2 left-3 text-[10px] text-slate-600">
+              {text.length.toLocaleString('fa-IR')} نویسه
+            </span>
           </div>
         </div>
 
         {/* 4. Action Button: ساختن فایل صوتی */}
+        <div className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
+          <span>
+            {CHARACTERS.find((item) => item.id === selectedCharacter)?.name} ·{' '}
+            {TONES.find((item) => item.id === selectedTone)?.description}
+          </span>
+          <span className="shrink-0 text-emerald-400">پردازش روی دستگاه</span>
+        </div>
         <button
           type="button"
           disabled={isGenerating || !text.trim() || voicePack.stage !== 'ready'}
