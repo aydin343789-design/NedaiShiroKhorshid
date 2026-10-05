@@ -43,12 +43,8 @@ jobs:
       - name: Build web bundle
         run: npm run build
 
-      - name: Create Android shell when absent
-        run: |
-          if [ ! -d android ]; then
-            npx cap add android
-          fi
-          npx cap sync android
+      - name: Create Android shell, sync, and generate project assets
+        run: npm run android:sync
 
       - name: Assemble debug APK
         working-directory: android
