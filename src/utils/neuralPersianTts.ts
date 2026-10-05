@@ -97,17 +97,17 @@ const CHARACTER_PROFILES: Record<CharacterId, CharacterProfile> = {
   },
   child: {
     model: 'gyro',
-    speechRate: 1.1,
-    semitones: 2.1,
-    lowShelfDb: -2.4,
-    highShelfDb: 2.5,
+    speechRate: 0.91,
+    semitones: 2.8,
+    lowShelfDb: -2.0,
+    highShelfDb: 2.8,
   },
   narrator: {
     model: 'amir',
-    speechRate: 0.9,
-    semitones: -2.1,
-    lowShelfDb: 3,
-    highShelfDb: -1.4,
+    speechRate: 0.79,
+    semitones: -2.8,
+    lowShelfDb: 3.8,
+    highShelfDb: -2.0,
   },
 };
 
@@ -128,58 +128,58 @@ interface ToneProfile {
  */
 const TONE_PROFILES: Record<ToneId, ToneProfile> = {
   cheerful: {
-    inferenceRate: 1.1,
-    noiseScale: 1.22,
-    noiseWidth: 1.14,
-    semitones: 1.05,
-    lowShelfDb: -0.6,
-    highShelfDb: 1.8,
+    inferenceRate: 0.94,
+    noiseScale: 1.16,
+    noiseWidth: 1.1,
+    semitones: 1.5,
+    lowShelfDb: -0.8,
+    highShelfDb: 2.2,
     reverbMix: 0,
   },
   intimate: {
-    inferenceRate: 0.91,
-    noiseScale: 0.82,
-    noiseWidth: 0.78,
-    semitones: -0.25,
-    lowShelfDb: 1.7,
-    highShelfDb: -1.15,
+    inferenceRate: 0.84,
+    noiseScale: 0.78,
+    noiseWidth: 0.74,
+    semitones: -0.4,
+    lowShelfDb: 1.4,
+    highShelfDb: -1.3,
     reverbMix: 0.015,
   },
   sad: {
-    inferenceRate: 0.8,
-    noiseScale: 0.68,
-    noiseWidth: 0.62,
-    semitones: -1.05,
-    lowShelfDb: 1.2,
-    highShelfDb: -2.5,
+    inferenceRate: 0.72,
+    noiseScale: 0.64,
+    noiseWidth: 0.58,
+    semitones: -1.6,
+    lowShelfDb: 1.8,
+    highShelfDb: -3.0,
     reverbMix: 0.025,
   },
   formal: {
-    inferenceRate: 0.98,
-    noiseScale: 0.78,
-    noiseWidth: 0.8,
+    inferenceRate: 0.86,
+    noiseScale: 0.74,
+    noiseWidth: 0.76,
     semitones: 0,
     lowShelfDb: 0,
     highShelfDb: 0,
     reverbMix: 0,
   },
   professional: {
-    inferenceRate: 1.03,
-    noiseScale: 0.9,
-    noiseWidth: 0.86,
+    inferenceRate: 0.9,
+    noiseScale: 0.86,
+    noiseWidth: 0.82,
     semitones: 0.2,
     lowShelfDb: 0.35,
     highShelfDb: 0.65,
     reverbMix: 0,
   },
   epic: {
-    inferenceRate: 0.86,
-    noiseScale: 1.14,
-    noiseWidth: 1.12,
-    semitones: -1.2,
-    lowShelfDb: 2.4,
-    highShelfDb: -0.8,
-    reverbMix: 0.07,
+    inferenceRate: 0.76,
+    noiseScale: 1.08,
+    noiseWidth: 1.08,
+    semitones: -1.5,
+    lowShelfDb: 2.8,
+    highShelfDb: -1.0,
+    reverbMix: 0.045,
   },
 };
 
@@ -379,7 +379,9 @@ export async function prepareOfflineVoicePack(
 
 function configureRuntime() {
   if (runtimeConfigured) return;
-  ort.env.wasm.numThreads = 1;
+  // Galaxy A04-class devices usually expose two useful browser workers. Using
+  // both reduces first-generation latency without exhausting the phone's RAM.
+  ort.env.wasm.numThreads = Math.max(1, Math.min(2, navigator.hardwareConcurrency || 1));
   ort.env.wasm.wasmPaths = ORT_WASM_PATHS;
   runtimeConfigured = true;
 }
@@ -446,6 +448,30 @@ function splitTextForPiper(text: string, maxLength = 260): string[] {
 
   if (current) chunks.push(current);
   return chunks;
+}
+
+/** Adds restrained, tone-specific punctuation without changing the words. */
+function prepareProsodyText(text: string, toneId: ToneId): string {
+  const normalized = text.replace(/[ \t]+/g, ' ').trim();
+  const clauses = normalized.split(/(?<=[،؛,:])\s+/).filter(Boolean);
+  const withBreaths = clauses.join('، ');
+
+  switch (toneId) {
+    case 'cheerful':
+      return withBreaths.replace(/[.!؟]+$/u, '') + '!';
+    case 'intimate':
+      return withBreaths.replace(/[.!؟]+$/u, '') + '…';
+    case 'sad':
+      return withBreaths.replace(/[.!؟]+$/u, '') + '…';
+    case 'formal':
+      return withBreaths.replace(/[!…]+/gu, '،').replace(/،\s*$/u, '') + '۔';
+    case 'professional':
+      return withBreaths.replace(/[!…]+/gu, '،').replace(/،\s*$/u, '') + '۔';
+    case 'epic':
+      return withBreaths.replace(/[.!؟]+$/u, '') + '!';
+    default:
+      return normalized;
+  }
 }
 
 async function phonemize(text: string, config: PiperConfig): Promise<string[]> {
@@ -653,7 +679,7 @@ export async function synthesizePersianNeuralAudio(
   await prepareOfflineVoicePack();
   const character = CHARACTER_PROFILES[characterId];
   const tone = TONE_PROFILES[toneId];
-  const chunks = splitTextForPiper(text);
+  const chunks = splitTextForPiper(prepareProsodyText(text, toneId));
   const voice = await loadVoice(character.model);
   const pcmChunks: Float32Array[] = [];
 
