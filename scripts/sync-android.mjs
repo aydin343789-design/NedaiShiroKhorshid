@@ -11,8 +11,10 @@ if (!existsSync('android')) {
   run('npx', ['cap', 'add', 'android']);
 }
 
-run('npx', ['capacitor-assets', 'generate', '--android']);
 run('npx', ['cap', 'sync', 'android']);
+// Generate the launcher assets after the final Capacitor sync; cap sync can
+// otherwise restore the default Capacitor icon over the custom project logo.
+run('npx', ['capacitor-assets', 'generate', '--android', '--assetPath', 'resources']);
 
 const gradleFile = 'android/app/build.gradle';
 let gradle = readFileSync(gradleFile, 'utf8');
