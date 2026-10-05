@@ -1,0 +1,444 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Menu,
+  Volume2,
+  RefreshCw,
+  Sparkles,
+  Check,
+  Smile,
+  Heart,
+  CloudRain,
+  Newspaper,
+  Briefcase,
+  Flame,
+} from 'lucide-react';
+import { LionSunEmblem } from './components/LionSunEmblem';
+import { HistoryDrawer } from './components/HistoryDrawer';
+import { AudioPlayerScreen } from './components/AudioPlayerScreen';
+import { CharacterId, ToneId, SavedAudioClip } from './types';
+import { CHARACTERS, TONES, DEFAULT_SAMPLE_TEXT } from './data/voices';
+import {
+  synthesizeOfflineAudio,
+  stopPersianUtterance,
+} from './utils/offlineVoiceSynthesizer';
+import { normalizePersianText } from './utils/persianNormalizer';
+
+const STORAGE_KEY = 'nedaye_shirokhorshid_history_v4';
+
+const TONE_ICONS: Record<ToneId, React.ReactNode> = {
+  cheerful: <Smile className="h-3.5 w-3.5" />,
+  intimate: <Heart className="h-3.5 w-3.5" />,
+  sad: <CloudRain className="h-3.5 w-3.5" />,
+  formal: <Newspaper className="h-3.5 w-3.5" />,
+  professional: <Briefcase className="h-3.5 w-3.5" />,
+  epic: <Flame className="h-3.5 w-3.5" />,
+};
+
+export default function App() {
+  const [selectedCharacter, setSelectedCharacter] = useState<CharacterId>('female');
+  const [selectedTone, setSelectedTone] = useState<ToneId>('cheerful');
+  const [text, setText] = useState<string>(DEFAULT_SAMPLE_TEXT);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [activeClip, setActiveClip] = useState<SavedAudioClip | null>(null);
+  const [history, setHistory] = useState<SavedAudioClip[]>([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
+  const [currentScreen, setCurrentScreen] = useState<'create' | 'player'>('create');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Load history from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setHistory(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage error:', e);
+    }
+  }, []);
+
+  const saveHistory = (items: SavedAudioClip[]) => {
+    setHistory(items);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    } catch (e) {
+      console.warn('LocalStorage save failed:', e);
+    }
+  };
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // Convert Base64 to Blob URL (MP3 default)
+  const base64ToBlobUrl = (base64Data: string, mimeType: string = 'audio/mp3') => {
+    const byteCharacters = atob(base64Data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: mimeType });
+    return URL.createObjectURL(blob);
+  };
+
+  // Generate Audio via High-Quality Persian Neural & MP3 Engine
+  const handleGenerateAudio = async (speed: number = 1.0, pitch: number = 1.0) => {
+    if (!text.trim()) {
+      showToast('لطفاً متنی را وارد کنید.');
+      return;
+    }
+
+    try {
+      setIsGenerating(true);
+
+      const charObj = CHARACTERS.find((c) => c.id === selectedCharacter);
+      const toneObj = TONES.find((t) => t.id === selectedTone);
+      const characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
+      const toneName = toneObj?.name || 'طبیعی';
+
+      // Normalized text according to Persian rules
+      const cleanText = normalizePersianText(text.trim());
+
+      let audioUrl = '';
+      let duration = 4;
+
+      // 1. Try server-side High-Fidelity MP3 Persian TTS with 8s timeout
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        const res = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            text: cleanText,
+            character: selectedCharacter,
+            tone: selectedTone,
+            speed,
+            pitch,
+          }),
+        });
+
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.audioBase64) {
+            audioUrl = base64ToBlobUrl(data.audioBase64, data.mimeType || 'audio/mp3');
+            duration = data.duration || 3;
+          }
+        }
+      } catch (networkErr) {
+        console.warn('Server TTS unavailable, using instant client fallback:', networkErr);
+      }
+
+      // 2. Client-side fallback if server was unavailable
+      if (!audioUrl) {
+        const synth = await synthesizeOfflineAudio(
+          cleanText,
+          selectedCharacter,
+          selectedTone,
+          speed,
+          pitch
+        );
+        audioUrl = synth.audioUrl;
+        duration = synth.duration;
+      }
+
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now
+        .getMinutes()
+        .toString()
+        .padStart(2, '0')}`;
+
+      const newClip: SavedAudioClip = {
+        id: `clip-${Date.now()}`,
+        text: text.trim(),
+        character: selectedCharacter,
+        characterName,
+        tone: selectedTone,
+        toneName,
+        audioUrl,
+        createdAt: timeStr,
+        duration: Math.max(2, Math.round(duration * 10) / 10),
+        speed,
+        pitch,
+      };
+
+      const updated = [newClip, ...history.slice(0, 19)];
+      saveHistory(updated);
+      setActiveClip(newClip);
+
+      // Transition to Player Screen
+      setCurrentScreen('player');
+    } catch (err: any) {
+      console.error('Audio synthesis failed:', err);
+      showToast('خطا در تولید فایل صوتی.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDownload = (clip: SavedAudioClip) => {
+    if (!clip.audioUrl) return;
+    const a = document.createElement('a');
+    a.href = clip.audioUrl;
+    a.download = `Nedaye-Shirokhorshid-${clip.character}-${clip.tone}-${Date.now()}.mp3`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('فایل صوتی MP3 با موفقیت دانلود شد.');
+  };
+
+  const handleDeleteClip = (id: string) => {
+    const updated = history.filter((c) => c.id !== id);
+    saveHistory(updated);
+    if (activeClip?.id === id) {
+      setActiveClip(updated[0] || null);
+    }
+    showToast('فایل از تاریخچه حذف شد.');
+  };
+
+  const handleClearHistory = () => {
+    saveHistory([]);
+    setActiveClip(null);
+    showToast('تمام تاریخچه پاک شد.');
+  };
+
+  const handleSelectClipFromHistory = (clip: SavedAudioClip) => {
+    setActiveClip(clip);
+    setCurrentScreen('player');
+  };
+
+  const handleRecreateWithSettings = async (speed: number, pitch: number) => {
+    await handleGenerateAudio(speed, pitch);
+  };
+
+  // Screen 2: Audio Player & Download View
+  if (currentScreen === 'player' && activeClip) {
+    const activeChar = CHARACTERS.find((c) => c.id === activeClip.character);
+
+    return (
+      <>
+        <AudioPlayerScreen
+          clip={activeClip}
+          onBack={() => {
+            stopPersianUtterance();
+            setCurrentScreen('create');
+          }}
+          onOpenHistory={() => setIsHistoryOpen(true)}
+          onDownload={handleDownload}
+          onRecreateWithSettings={handleRecreateWithSettings}
+          isRegenerating={isGenerating}
+        />
+        <HistoryDrawer
+          isOpen={isHistoryOpen}
+          onClose={() => setIsHistoryOpen(false)}
+          history={history}
+          onSelectClip={handleSelectClipFromHistory}
+          onDownloadClip={handleDownload}
+          onDeleteClip={handleDeleteClip}
+          onClearHistory={handleClearHistory}
+        />
+      </>
+    );
+  }
+
+  // Screen 1: Create Audio Screen (Strict single-page, no scroll)
+  return (
+    <div className="flex h-screen max-h-screen w-full flex-col justify-between overflow-hidden bg-[#06090e] text-slate-100 p-3 sm:p-4 select-none font-sans">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-amber-500/40 bg-slate-900/95 px-4 py-2 text-xs font-medium text-amber-200 shadow-xl backdrop-blur-md">
+          {toastMessage}
+        </div>
+      )}
+
+      {/* Top Header */}
+      <header className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+        <div className="flex items-center gap-2.5">
+          <LionSunEmblem size="sm" />
+          <div>
+            <h1 className="text-base font-bold text-white tracking-wide flex items-center gap-1">
+              <span>ندای</span>
+              <span className="text-amber-400">شیروخورشید</span>
+            </h1>
+            <p className="text-[10px] text-slate-400 -mt-0.5">استودیو آفلاین تبدیل متن به گفتار</p>
+          </div>
+        </div>
+
+        {/* Hamburger Menu (منوی سه خط) */}
+        <button
+          type="button"
+          onClick={() => setIsHistoryOpen(true)}
+          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/80 text-slate-300 hover:text-amber-400 hover:border-amber-500/40 transition-colors shadow-sm"
+          title="منوی تاریخچه"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      </header>
+
+      {/* Main Workspace (Strictly fitted, no scroll) */}
+      <main className="flex flex-1 flex-col justify-between py-2 max-w-xl mx-auto w-full gap-2.5">
+        {/* 1. Character Selection with Real Avatars */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs px-0.5">
+            <span className="font-semibold text-slate-200">انتخاب گوینده:</span>
+          </div>
+
+          <div className="grid grid-cols-4 gap-2">
+            {CHARACTERS.map((char) => {
+              const isSelected = selectedCharacter === char.id;
+
+              return (
+                <button
+                  key={char.id}
+                  type="button"
+                  onClick={() => setSelectedCharacter(char.id)}
+                  className={`group relative flex flex-col items-center justify-center rounded-2xl p-2 transition-all duration-200 ${
+                    isSelected
+                      ? 'border-2 border-amber-500 bg-gradient-to-b from-amber-500/20 to-slate-900/90 shadow-md shadow-amber-500/15 ring-1 ring-amber-500/30'
+                      : 'border border-slate-800/90 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900/80'
+                  }`}
+                >
+                  {/* Selected check badge */}
+                  {isSelected && (
+                    <div className="absolute top-1 left-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-slate-950">
+                      <Check className="h-2.5 w-2.5 stroke-[3]" />
+                    </div>
+                  )}
+
+                  {/* Avatar Photo */}
+                  <div
+                    className={`relative h-11 w-11 sm:h-12 sm:w-12 rounded-full overflow-hidden p-0.5 transition-transform group-hover:scale-105 ${
+                      isSelected
+                        ? 'bg-gradient-to-tr from-amber-500 to-amber-300 shadow-md shadow-amber-500/20 ring-2 ring-amber-400/40'
+                        : 'bg-slate-800 border border-slate-700'
+                    }`}
+                  >
+                    <img
+                      src={char.avatar}
+                      alt={char.name}
+                      className="h-full w-full rounded-full object-cover"
+                    />
+                  </div>
+
+                  <span className="mt-1.5 text-xs font-bold text-white leading-tight">
+                    {char.name}
+                  </span>
+                  <span className="text-[10px] text-amber-400/90 font-medium">
+                    {char.role}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 2. Tone Selection with Mood Icons */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs px-0.5">
+            <span className="font-semibold text-slate-200">لحن خوانش:</span>
+          </div>
+
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+            {TONES.map((tone) => {
+              const isSelected = selectedTone === tone.id;
+
+              return (
+                <button
+                  key={tone.id}
+                  type="button"
+                  onClick={() => setSelectedTone(tone.id)}
+                  className={`flex items-center justify-center gap-1 rounded-xl py-1.5 px-2 text-center text-xs font-medium transition-all ${
+                    isSelected
+                      ? 'border-2 border-amber-500 bg-amber-500/20 text-amber-300 font-bold shadow-sm'
+                      : 'border border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  <span className={isSelected ? 'text-amber-400' : 'text-slate-500'}>
+                    {TONE_ICONS[tone.id]}
+                  </span>
+                  <span>{tone.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 3. Text Box with 1 default sample */}
+        <div className="flex flex-1 flex-col space-y-1.5 min-h-[130px]">
+          <div className="flex items-center justify-between text-xs px-0.5">
+            <span className="font-semibold text-slate-200">متن فارسی:</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setText(DEFAULT_SAMPLE_TEXT)}
+                className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-medium"
+                title="بارگذاری مجدد متن نمونه"
+              >
+                <RefreshCw className="h-3 w-3" />
+                <span>متن نمونه</span>
+              </button>
+              <span className="text-slate-700">•</span>
+              <button
+                type="button"
+                onClick={() => setText('')}
+                className="text-[11px] text-slate-500 hover:text-rose-400"
+              >
+                پاک کردن
+              </button>
+            </div>
+          </div>
+
+          <div className="relative flex-1 rounded-2xl border border-slate-800 bg-slate-950/90 p-3 shadow-inner focus-within:border-amber-500/60 transition-colors">
+            <textarea
+              dir="rtl"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="متن خود را اینجا بنویسید..."
+              className="h-full w-full resize-none bg-transparent text-xs sm:text-sm leading-relaxed text-slate-100 placeholder-slate-600 outline-none"
+            />
+          </div>
+        </div>
+
+        {/* 4. Action Button: ساختن فایل صوتی */}
+        <button
+          type="button"
+          disabled={isGenerating || !text.trim()}
+          onClick={() => handleGenerateAudio(1.0, 1.0)}
+          className="flex w-full items-center justify-center gap-2.5 rounded-2xl border border-amber-400/50 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 py-3.5 px-6 font-bold text-slate-950 shadow-xl shadow-amber-500/20 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {isGenerating ? (
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-slate-950 animate-ping"></span>
+              <span className="text-sm font-bold">در حال پردازش و تولید فایل صوتی...</span>
+            </div>
+          ) : (
+            <>
+              <Volume2 className="h-5 w-5 stroke-[2.5]" />
+              <span className="text-sm sm:text-base font-black">ساختن فایل صوتی</span>
+            </>
+          )}
+        </button>
+      </main>
+
+      {/* History Drawer */}
+      <HistoryDrawer
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        history={history}
+        onSelectClip={handleSelectClipFromHistory}
+        onDownloadClip={handleDownload}
+        onDeleteClip={handleDeleteClip}
+        onClearHistory={handleClearHistory}
+      />
+    </div>
+  );
+}

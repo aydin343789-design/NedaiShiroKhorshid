@@ -1,0 +1,10 @@
+{
+  "name": "ندای شیروخورشید",
+  "description": "سامانه آفلاین تبدیل متن به گفتار ندای شیروخورشید با تولید صدای اختصاصی، تنظیم لحن و دانلود فایل صوتی بدون نیاز به اینترنت",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
+
+
