@@ -18,9 +18,10 @@ import { AudioPlayerScreen } from './components/AudioPlayerScreen';
 import { CharacterId, ToneId, SavedAudioClip } from './types';
 import { CHARACTERS, TONES, DEFAULT_SAMPLE_TEXT } from './data/voices';
 import {
-  synthesizeOfflineAudio,
-  stopPersianUtterance,
-} from './utils/offlineVoiceSynthesizer';
+  prepareOfflineVoicePack,
+  synthesizePersianNeuralAudio,
+  type VoicePackProgress,
+} from './utils/neuralPersianTts';
 import { normalizePersianText } from './utils/persianNormalizer';
 
 const STORAGE_KEY = 'nedaye_shirokhorshid_history_v4';
@@ -44,6 +45,13 @@ export default function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [currentScreen, setCurrentScreen] = useState<'create' | 'player'>('create');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [voicePack, setVoicePack] = useState<VoicePackProgress>({
+    stage: 'checking',
+    completed: 0,
+    total: 3,
+    message: 'بررسی بسته‌های صدای آفلاین…',
+  });
+  const [generationMessage, setGenerationMessage] = useState('');
 
   // Load history from localStorage
   useEffect(() => {
@@ -60,6 +68,23 @@ export default function App() {
     }
   }, []);
 
+  const prepareVoicePack = () => {
+    setVoicePack({
+      stage: 'checking',
+      completed: 0,
+      total: 3,
+      message: 'بررسی بسته‌های صدای آفلاین…',
+    });
+    void prepareOfflineVoicePack(setVoicePack).catch((error) => {
+      console.error('Offline neural voice preparation failed:', error);
+    });
+  };
+
+  // Voice models are acquired once on the first launch and persist in local cache.
+  useEffect(() => {
+    prepareVoicePack();
+  }, []);
+
   const saveHistory = (items: SavedAudioClip[]) => {
     setHistory(items);
     try {
@@ -74,18 +99,6 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Convert Base64 to Blob URL (MP3 default)
-  const base64ToBlobUrl = (base64Data: string, mimeType: string = 'audio/mp3') => {
-    const byteCharacters = atob(base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: mimeType });
-    return URL.createObjectURL(blob);
-  };
-
   // Generate Audio via High-Quality Persian Neural & MP3 Engine
   const handleGenerateAudio = async (speed: number = 1.0, pitch: number = 1.0) => {
     if (!text.trim()) {
@@ -93,8 +106,14 @@ export default function App() {
       return;
     }
 
+    if (voicePack.stage !== 'ready') {
+      showToast(voicePack.error || 'صداهای آفلاین هنوز آماده نشده‌اند.');
+      return;
+    }
+
     try {
       setIsGenerating(true);
+      setGenerationMessage('در حال آماده‌سازی موتور عصبی…');
 
       const charObj = CHARACTERS.find((c) => c.id === selectedCharacter);
       const toneObj = TONES.find((t) => t.id === selectedTone);
@@ -103,53 +122,14 @@ export default function App() {
 
       // Normalized text according to Persian rules
       const cleanText = normalizePersianText(text.trim());
-
-      let audioUrl = '';
-      let duration = 4;
-
-      // 1. Try server-side High-Fidelity MP3 Persian TTS with 8s timeout
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-        const res = await fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            text: cleanText,
-            character: selectedCharacter,
-            tone: selectedTone,
-            speed,
-            pitch,
-          }),
-        });
-
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.audioBase64) {
-            audioUrl = base64ToBlobUrl(data.audioBase64, data.mimeType || 'audio/mp3');
-            duration = data.duration || 3;
-          }
-        }
-      } catch (networkErr) {
-        console.warn('Server TTS unavailable, using instant client fallback:', networkErr);
-      }
-
-      // 2. Client-side fallback if server was unavailable
-      if (!audioUrl) {
-        const synth = await synthesizeOfflineAudio(
-          cleanText,
-          selectedCharacter,
-          selectedTone,
-          speed,
-          pitch
-        );
-        audioUrl = synth.audioUrl;
-        duration = synth.duration;
-      }
+      const synth = await synthesizePersianNeuralAudio(
+        cleanText,
+        selectedCharacter,
+        selectedTone,
+        speed,
+        pitch,
+        (progress) => setGenerationMessage(progress.message)
+      );
 
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now
@@ -164,9 +144,9 @@ export default function App() {
         characterName,
         tone: selectedTone,
         toneName,
-        audioUrl,
+        audioUrl: synth.audioUrl,
         createdAt: timeStr,
-        duration: Math.max(2, Math.round(duration * 10) / 10),
+        duration: Math.max(2, Math.round(synth.duration * 10) / 10),
         speed,
         pitch,
       };
@@ -182,6 +162,7 @@ export default function App() {
       showToast('خطا در تولید فایل صوتی.');
     } finally {
       setIsGenerating(false);
+      setGenerationMessage('');
     }
   };
 
@@ -229,7 +210,6 @@ export default function App() {
         <AudioPlayerScreen
           clip={activeClip}
           onBack={() => {
-            stopPersianUtterance();
             setCurrentScreen('create');
           }}
           onOpenHistory={() => setIsHistoryOpen(true)}
@@ -283,6 +263,36 @@ export default function App() {
           <Menu className="h-5 w-5" />
         </button>
       </header>
+
+      {/* First-launch model download and persistent offline readiness */}
+      <section
+        className={`mx-auto mt-2 flex w-full max-w-xl items-center justify-between gap-3 rounded-xl border px-3 py-2 text-[11px] sm:text-xs ${
+          voicePack.stage === 'ready'
+            ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-200'
+            : voicePack.stage === 'error'
+              ? 'border-rose-500/35 bg-rose-500/10 text-rose-100'
+              : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+        }`}
+        role="status"
+      >
+        <span className="leading-relaxed">
+          {voicePack.message}
+          {voicePack.stage === 'downloading' && voicePack.total > 0
+            ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
+            : ''}
+        </span>
+        {voicePack.stage === 'error' ? (
+          <button
+            type="button"
+            onClick={prepareVoicePack}
+            className="shrink-0 rounded-lg border border-rose-300/50 px-2 py-1 font-bold text-rose-100 transition-colors hover:bg-rose-400/15"
+          >
+            تلاش دوباره
+          </button>
+        ) : voicePack.stage === 'ready' ? (
+          <span className="shrink-0 font-bold text-emerald-300">کاملاً آفلاین</span>
+        ) : null}
+      </section>
 
       {/* Main Workspace (Strictly fitted, no scroll) */}
       <main className="flex flex-1 flex-col justify-between py-2 max-w-xl mx-auto w-full gap-2.5">
@@ -411,14 +421,14 @@ export default function App() {
         {/* 4. Action Button: ساختن فایل صوتی */}
         <button
           type="button"
-          disabled={isGenerating || !text.trim()}
+          disabled={isGenerating || !text.trim() || voicePack.stage !== 'ready'}
           onClick={() => handleGenerateAudio(1.0, 1.0)}
           className="flex w-full items-center justify-center gap-2.5 rounded-2xl border border-amber-400/50 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 py-3.5 px-6 font-bold text-slate-950 shadow-xl shadow-amber-500/20 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isGenerating ? (
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-slate-950 animate-ping"></span>
-              <span className="text-sm font-bold">در حال پردازش و تولید فایل صوتی...</span>
+              <span className="text-sm font-bold">{generationMessage || 'در حال پردازش و تولید فایل صوتی…'}</span>
             </div>
           ) : (
             <>

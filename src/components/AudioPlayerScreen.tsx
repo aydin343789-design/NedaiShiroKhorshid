@@ -15,7 +15,6 @@ import {
 import { SavedAudioClip } from '../types';
 import { LionSunEmblem } from './LionSunEmblem';
 import { CHARACTERS } from '../data/voices';
-import { speakPersianUtterance, stopPersianUtterance } from '../utils/offlineVoiceSynthesizer';
 
 interface AudioPlayerScreenProps {
   clip: SavedAudioClip;
@@ -44,34 +43,27 @@ export const AudioPlayerScreen: React.FC<AudioPlayerScreenProps> = ({
 
   // Play audio on initial load
   useEffect(() => {
+    setSpeed(clip.speed || 1.0);
+    setPitch(clip.pitch || 1.0);
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
-      audioRef.current.playbackRate = speed;
+      // Speed and pitch are already rendered into the neural MP3. Playback
+      // starts at 1x so the selected profile is not applied a second time.
       setCurrentTime(0);
-      playBoth();
+      playAudioAtRate(1);
     }
-    return () => {
-      stopPersianUtterance();
-    };
   }, [clip.id]);
 
-  const playBoth = () => {
+  const playAudioAtRate = (rate: number) => {
     setIsPlaying(true);
     if (audioRef.current) {
-      audioRef.current.playbackRate = speed;
+      audioRef.current.playbackRate = rate;
       audioRef.current.play().catch(() => {});
     }
-    // Also trigger vocal articulation with identical pitch & speed
-    speakPersianUtterance(
-      clip.text,
-      clip.character,
-      clip.tone,
-      speed,
-      pitch,
-      () => {
-        // ended callback
-      }
-    );
+  };
+
+  const playBoth = () => {
+    playAudioAtRate(speed / (clip.speed || 1));
   };
 
   const pauseBoth = () => {
@@ -79,7 +71,6 @@ export const AudioPlayerScreen: React.FC<AudioPlayerScreenProps> = ({
     if (audioRef.current) {
       audioRef.current.pause();
     }
-    stopPersianUtterance();
   };
 
   const togglePlay = () => {
@@ -133,7 +124,8 @@ export const AudioPlayerScreen: React.FC<AudioPlayerScreenProps> = ({
   const handleSpeedChange = (val: number) => {
     setSpeed(val);
     if (audioRef.current) {
-      audioRef.current.playbackRate = val;
+      // Preview a relative change; pressing Apply creates a new pre-rendered MP3.
+      audioRef.current.playbackRate = val / (clip.speed || 1);
     }
   };
 

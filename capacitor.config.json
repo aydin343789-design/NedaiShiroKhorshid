@@ -1,0 +1,8 @@
+{
+  "appId": "ir.nedaye.shirokhorshid",
+  "appName": "ندای شیروخورشید",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}
