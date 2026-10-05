@@ -76,7 +76,7 @@ npm run android:apk
 
 این فرمان ابتدا نسخهٔ وب را می‌سازد، در صورت نبودن پوشهٔ Android پوستهٔ لازم را ایجاد می‌کند، فایل‌های وب را همگام‌سازی می‌کند و سپس APK را می‌سازد.
 
-لوگوی موجود در `assets/icon.png` هنگام ساخت Android به آیکون‌های launcher در تمام تراکم‌های صفحه تبدیل می‌شود و روی بستهٔ APK و صفحهٔ برنامهٔ گوشی نمایش داده خواهد شد.
+لوگوی موجود در `resources/icon.png` هنگام ساخت Android به آیکون‌های launcher در تمام تراکم‌های صفحه تبدیل می‌شود و روی بستهٔ APK و صفحهٔ برنامهٔ گوشی نمایش داده خواهد شد.
 
 ## ساخت خودکار APK در GitHub Actions
 
@@ -115,6 +115,8 @@ src/
 public/runtime/
 ├── ort/                            فایل‌های ONNX Runtime WebAssembly
 └── piper/                          فایل‌های Piper phonemizer
+
+resources/icon.png                  لوگوی رسمی launcher و بستهٔ Android
 
 .github/workflows/android-apk.yml   گردش‌کار ساخت خودکار APK
 capacitor.config.json               تنظیمات بستهٔ Android
