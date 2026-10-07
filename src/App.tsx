@@ -48,7 +48,7 @@ export default function App() {
   const [voicePack, setVoicePack] = useState<VoicePackProgress>({
     stage: 'checking',
     completed: 0,
-    total: 3,
+    total: 4,
     message: 'بررسی بسته‌های صدای آفلاین…',
   });
   const [generationMessage, setGenerationMessage] = useState('');
@@ -72,7 +72,7 @@ export default function App() {
     setVoicePack({
       stage: 'checking',
       completed: 0,
-      total: 3,
+      total: 4,
       message: 'بررسی بسته‌های صدای آفلاین…',
     });
     void prepareOfflineVoicePack(setVoicePack).catch((error) => {

@@ -18,7 +18,7 @@ const ORT_WASM_PATHS = {
   'ort-wasm.wasm': '/runtime/ort/ort-wasm.wasm',
 };
 
-type VoiceModelId = 'mana' | 'amir' | 'gyro';
+type VoiceModelId = 'mana' | 'amir' | 'gyro' | 'ganji';
 
 interface ModelSource {
   id: VoiceModelId;
@@ -43,11 +43,11 @@ const VOICE_MODELS: Record<VoiceModelId, ModelSource> = {
   },
   amir: {
     id: 'amir',
-    label: 'امیر',
+    label: 'امیر فارسی',
     modelUrl:
-      'https://huggingface.co/diffusionstudio/piper-voices/resolve/main/fa/fa_IR/amir/medium/fa_IR-amir-medium.onnx',
+      'https://huggingface.co/SadeghK/persian-text-to-speech/resolve/main/farsi/amir/epoch=5261-step=2455712.onnx',
     configUrl:
-      'https://huggingface.co/diffusionstudio/piper-voices/resolve/main/fa/fa_IR/amir/medium/fa_IR-amir-medium.onnx.json',
+      'https://huggingface.co/SadeghK/persian-text-to-speech/resolve/main/farsi/amir/epoch=5261-step=2455712.onnx.json',
   },
   gyro: {
     id: 'gyro',
@@ -56,6 +56,14 @@ const VOICE_MODELS: Record<VoiceModelId, ModelSource> = {
       'https://huggingface.co/diffusionstudio/piper-voices/resolve/main/fa/fa_IR/gyro/medium/fa_IR-gyro-medium.onnx',
     configUrl:
       'https://huggingface.co/diffusionstudio/piper-voices/resolve/main/fa/fa_IR/gyro/medium/fa_IR-gyro-medium.onnx.json',
+  },
+  ganji: {
+    id: 'ganji',
+    label: 'گنجی فارسی',
+    modelUrl:
+      'https://huggingface.co/SadeghK/persian-text-to-speech/resolve/main/farsi/ganji/epoch=5719-step=2609600-ganji.onnx',
+    configUrl:
+      'https://huggingface.co/SadeghK/persian-text-to-speech/resolve/main/farsi/ganji/epoch=5719-step=2609600-ganji.onnx.json',
   },
 };
 
@@ -82,32 +90,36 @@ interface CharacterProfile {
 
 const CHARACTER_PROFILES: Record<CharacterId, CharacterProfile> = {
   female: {
+    // Mana is the approved Iranian timbre from sample 3; keep its pitch
+    // natural instead of forcing the brighter, less convincing Gyro voice.
     model: 'mana',
-    speechRate: 0.82,
-    semitones: 0.1,
-    lowShelfDb: -0.5,
-    highShelfDb: 1.2,
+    speechRate: 0.78,
+    semitones: 0.8,
+    lowShelfDb: 0.2,
+    highShelfDb: 1.8,
   },
   male: {
-    model: 'amir',
-    speechRate: 0.80,
+    model: 'gyro',
+    speechRate: 0.84,
     semitones: -0.6,
     lowShelfDb: 1.4,
     highShelfDb: -0.5,
   },
   child: {
-    model: 'gyro',
-    speechRate: 0.58,
-    semitones: 3.4,
-    lowShelfDb: -2.0,
-    highShelfDb: 2.8,
+    // Ganji gives the child a separate neural source rather than turning the
+    // approved adult Mana sample into a thin/high-pitched imitation.
+    model: 'ganji',
+    speechRate: 0.72,
+    semitones: 1.25,
+    lowShelfDb: -0.8,
+    highShelfDb: 2.4,
   },
   narrator: {
-    model: 'amir',
-    speechRate: 0.58,
-    semitones: -3.4,
-    lowShelfDb: 3.8,
-    highShelfDb: -2.0,
+    model: 'gyro',
+    speechRate: 0.68,
+    semitones: -1.6,
+    lowShelfDb: 1.5,
+    highShelfDb: -0.5,
   },
 };
 
@@ -469,8 +481,14 @@ function splitTextForPiper(text: string, maxLength = 220): string[] {
 /** Adds restrained, tone-specific punctuation without changing the words. */
 function prepareProsodyText(text: string, toneId: ToneId): string {
   const normalized = text.replace(/[ \t]+/g, ' ').trim();
-  const clauses = normalized.split(/(?<=[،؛,:])\s+/).filter(Boolean);
-  const withBreaths = clauses.join('، ');
+  // Keep ZWNJ (half-space) intact: «می‌روم» must stay one connected word.
+  // Do not invent commas between ordinary words; only the user's punctuation
+  // controls the pause plan.
+  const withBreaths = normalized
+    .replace(/،\s*/gu, '، ')
+    .replace(/…\s*/gu, '… ')
+    .replace(/؛\s*/gu, '؛ ')
+    .replace(/\s+([.!؟:])/gu, '$1');
 
   switch (toneId) {
     case 'cheerful':
@@ -567,16 +585,29 @@ async function synthesizeChunk(
   return pcm;
 }
 
-function joinPcm(chunks: Float32Array[], sampleRate: number, tone: ToneProfile): Float32Array {
-  const gap = Math.floor(sampleRate * (tone.pauseMs / 1000));
-  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0) + Math.max(0, chunks.length - 1) * gap;
+function joinPcm(chunks: Float32Array[], labels: string[], sampleRate: number, tone: ToneProfile): Float32Array {
+  const gaps = chunks.slice(0, -1).map((_, index) => {
+    const sourceText = labels[index] || '';
+    const punctuation = sourceText.trim().at(-1);
+    const pauseMs = punctuation === '…'
+      ? tone.pauseMs * 1.8 + tone.breathMs
+      : punctuation === '،'
+        ? tone.pauseMs * 0.72 + tone.breathMs
+        : punctuation === '؛' || punctuation === ':'
+          ? tone.pauseMs * 1.15 + tone.breathMs * 0.75
+          : /[.!؟!۔]/u.test(punctuation || '')
+            ? tone.pauseMs * 1.35 + tone.breathMs
+            : Math.min(90, tone.pauseMs * 0.28);
+    return Math.floor(sampleRate * (pauseMs / 1000));
+  });
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0) + gaps.reduce((sum, gap) => sum + gap, 0);
   const merged = new Float32Array(total);
   let offset = 0;
 
   for (let index = 0; index < chunks.length; index += 1) {
     merged.set(chunks[index], offset);
     offset += chunks[index].length;
-    if (index < chunks.length - 1) offset += gap;
+    if (index < gaps.length) offset += gaps[index];
   }
   return merged;
 }
@@ -713,7 +744,7 @@ export async function synthesizePersianNeuralAudio(
     total: chunks.length + 1,
     message: 'پردازش لحن و ساخت فایل MP3…',
   });
-  const merged = joinPcm(pcmChunks, voice.config.audio.sample_rate, tone);
+  const merged = joinPcm(pcmChunks, chunks, voice.config.audio.sample_rate, tone);
   const styled = await renderStyle(merged, voice.config.audio.sample_rate, character, tone, userPitch);
   const blob = await audioBufferToMp3(styled);
 
