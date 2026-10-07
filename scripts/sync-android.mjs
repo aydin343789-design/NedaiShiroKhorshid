@@ -33,6 +33,12 @@ const signingEnv = [
 ];
 const stableSigningEnabled = signingEnv.every((name) => process.env[name]);
 if (stableSigningEnabled) {
+  // Sync can be run repeatedly on a local checkout. Remove any prior block
+  // first so Gradle never receives duplicate `release` signing definitions.
+  gradle = gradle.replace(
+    /\n    signingConfigs \{\n        release \{\n(?:            [^\n]*\n)*        \}\n    \}\n/g,
+    '\n',
+  );
   const signingConfig = `
     signingConfigs {
         release {
@@ -45,8 +51,8 @@ if (stableSigningEnabled) {
 `;
   gradle = gradle.replace('android {\n', `android {\n${signingConfig}`);
   gradle = gradle.replace(
-    '        release {\n',
-    '        release {\n            signingConfig signingConfigs.release\n',
+    /(buildTypes\s*\{\s*release\s*\{)/,
+    '$1\n            signingConfig signingConfigs.release',
   );
 }
 writeFileSync(gradleFile, gradle);
