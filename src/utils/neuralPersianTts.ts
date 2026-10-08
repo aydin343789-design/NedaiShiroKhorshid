@@ -209,7 +209,7 @@ const TONE_PROFILES: Record<ToneId, ToneProfile> = {
   },
 };
 
-export type VoicePackStage = 'checking' | 'downloading' | 'ready' | 'error';
+export type VoicePackStage = 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
 
 export interface VoicePackProgress {
   stage: VoicePackStage;
@@ -238,7 +238,7 @@ interface LoadedVoice {
   session: ort.InferenceSession;
 }
 
-let preparationPromise: Promise<void> | null = null;
+const preparationPromises: Partial<Record<VoiceModelId, Promise<void>>> = {};
 let activeVoice: LoadedVoice | null = null;
 let runtimeConfigured = false;
 
@@ -359,18 +359,17 @@ async function downloadModel(
  * without any connection.
  */
 export async function prepareOfflineVoicePack(
-  callback?: (progress: VoicePackProgress) => void
+  callback?: (progress: VoicePackProgress) => void,
+  preferredCharacter: CharacterId = 'female'
 ): Promise<void> {
   assertSupported();
 
-  if (!preparationPromise) {
-    preparationPromise = (async () => {
-      const models = Object.values(VOICE_MODELS);
-      for (let index = 0; index < models.length; index += 1) {
-        await downloadModel(models[index], index, models.length, callback);
-      }
+  const preferredModel = CHARACTER_PROFILES[preferredCharacter]?.model || 'mana';
+  if (!preparationPromises[preferredModel]) {
+    preparationPromises[preferredModel] = (async () => {
+      await downloadModel(VOICE_MODELS[preferredModel], 0, 1, callback);
     })().catch((error) => {
-      preparationPromise = null;
+      delete preparationPromises[preferredModel];
       throw error;
     });
   }
@@ -378,25 +377,25 @@ export async function prepareOfflineVoicePack(
   reportVoicePack(callback, {
     stage: 'checking',
     completed: 0,
-    total: Object.keys(VOICE_MODELS).length,
-    message: 'بررسی بسته‌های صدای آفلاین…',
+    total: 1,
+    message: 'بررسی بستهٔ صدای آفلاین انتخاب‌شده…',
   });
 
   try {
-    await preparationPromise;
+    await preparationPromises[preferredModel];
     reportVoicePack(callback, {
       stage: 'ready',
-      completed: Object.keys(VOICE_MODELS).length,
-      total: Object.keys(VOICE_MODELS).length,
-      message: 'صداهای عصبی آفلاین آماده‌اند.',
+      completed: 1,
+      total: 1,
+      message: 'صدای آفلاین آماده است.',
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'آماده‌سازی صدا ناموفق بود.';
     reportVoicePack(callback, {
       stage: 'error',
       completed: 0,
-      total: Object.keys(VOICE_MODELS).length,
-      message: 'دانلود اولیهٔ صداها کامل نشد.',
+      total: 1,
+      message: 'آماده‌سازی صدای آفلاین کامل نشد.',
       error: message,
     });
     throw error;
@@ -681,7 +680,7 @@ async function renderStyle(
   return context.startRendering();
 }
 
-async function audioBufferToMp3(audio: AudioBuffer): Promise<Blob> {
+export async function audioBufferToMp3(audio: AudioBuffer): Promise<Blob> {
   const module = await import('@breezystack/lamejs');
   const Mp3Encoder = (module as { Mp3Encoder?: new (channels: number, sampleRate: number, kbps: number) => any })
     .Mp3Encoder;
@@ -723,7 +722,7 @@ export async function synthesizePersianNeuralAudio(
 ): Promise<NeuralAudioResult> {
   if (!text.trim()) throw new Error('متنی برای خوانش وارد نشده است.');
 
-  await prepareOfflineVoicePack();
+  await prepareOfflineVoicePack(undefined, characterId);
   const character = CHARACTER_PROFILES[characterId];
   const tone = TONE_PROFILES[toneId];
   const chunks = splitTextForPiper(prepareProsodyText(text, toneId));

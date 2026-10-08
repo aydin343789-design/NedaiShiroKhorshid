@@ -1,6 +1,6 @@
 {
   "name": "ندای شیروخورشید",
-  "description": "سامانه آفلاین تبدیل متن به گفتار ندای شیروخورشید با تولید صدای اختصاصی، تنظیم لحن و دانلود فایل صوتی بدون نیاز به اینترنت",
+  "description": "اپلیکیشن تبدیل متن فارسی به گفتار با دو موتور آنلاین و آفلاین؛ آوا برای کیفیت آنلاین و Piper برای تولید صدای محلی بدون وابستگی به Android TTS",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

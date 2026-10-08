@@ -23,6 +23,7 @@ import {
   type VoicePackProgress,
 } from './utils/neuralPersianTts';
 import { normalizePersianText } from './utils/persianNormalizer';
+import { synthesizePersianOnlineAudio } from './utils/onlinePersianTts';
 
 const STORAGE_KEY = 'nedaye_shirokhorshid_history_v4';
 
@@ -38,6 +39,7 @@ const TONE_ICONS: Record<ToneId, React.ReactNode> = {
 export default function App() {
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterId>('female');
   const [selectedTone, setSelectedTone] = useState<ToneId>('cheerful');
+  const [engineMode, setEngineMode] = useState<'offline' | 'online'>('online');
   const [text, setText] = useState<string>(DEFAULT_SAMPLE_TEXT);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [activeClip, setActiveClip] = useState<SavedAudioClip | null>(null);
@@ -46,10 +48,10 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<'create' | 'player'>('create');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [voicePack, setVoicePack] = useState<VoicePackProgress>({
-    stage: 'checking',
+    stage: 'idle',
     completed: 0,
-    total: 4,
-    message: 'بررسی بسته‌های صدای آفلاین…',
+    total: 1,
+    message: 'صدای آفلاین فقط هنگام انتخاب حالت آفلاین آماده می‌شود.',
   });
   const [generationMessage, setGenerationMessage] = useState('');
 
@@ -72,18 +74,18 @@ export default function App() {
     setVoicePack({
       stage: 'checking',
       completed: 0,
-      total: 4,
-      message: 'بررسی بسته‌های صدای آفلاین…',
+      total: 1,
+      message: 'بررسی بستهٔ صدای آفلاین انتخاب‌شده…',
     });
-    void prepareOfflineVoicePack(setVoicePack).catch((error) => {
+    void prepareOfflineVoicePack(setVoicePack, selectedCharacter).catch((error) => {
       console.error('Offline neural voice preparation failed:', error);
     });
   };
 
   // Voice models are acquired once on the first launch and persist in local cache.
   useEffect(() => {
-    prepareVoicePack();
-  }, []);
+    if (engineMode === 'offline') prepareVoicePack();
+  }, [engineMode, selectedCharacter]);
 
   const saveHistory = (items: SavedAudioClip[]) => {
     setHistory(items);
@@ -106,30 +108,34 @@ export default function App() {
       return;
     }
 
-    if (voicePack.stage !== 'ready') {
-      showToast(voicePack.error || 'صداهای آفلاین هنوز آماده نشده‌اند.');
+    if (engineMode === 'offline' && voicePack.stage !== 'ready') {
+      showToast(voicePack.error || 'صدای آفلاین هنوز آماده نشده است.');
       return;
     }
 
     try {
       setIsGenerating(true);
-      setGenerationMessage('در حال آماده‌سازی موتور عصبی…');
+      setGenerationMessage(engineMode === 'online' ? 'در حال اتصال به موتور آنلاین…' : 'در حال آماده‌سازی موتور آفلاین…');
 
       const charObj = CHARACTERS.find((c) => c.id === selectedCharacter);
       const toneObj = TONES.find((t) => t.id === selectedTone);
-      const characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
+      const characterName = engineMode === 'online'
+        ? 'آوا آنلاین (فارسی)'
+        : `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
       const toneName = toneObj?.name || 'طبیعی';
 
       // Normalized text according to Persian rules
       const cleanText = normalizePersianText(text.trim());
-      const synth = await synthesizePersianNeuralAudio(
-        cleanText,
-        selectedCharacter,
-        selectedTone,
-        speed,
-        pitch,
-        (progress) => setGenerationMessage(progress.message)
-      );
+      const synth = engineMode === 'online'
+        ? await synthesizePersianOnlineAudio(cleanText, speed, (progress) => setGenerationMessage(progress.message))
+        : await synthesizePersianNeuralAudio(
+            cleanText,
+            selectedCharacter,
+            selectedTone,
+            speed,
+            pitch,
+            (progress) => setGenerationMessage(progress.message)
+          );
 
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now
@@ -159,7 +165,7 @@ export default function App() {
       setCurrentScreen('player');
     } catch (err: any) {
       console.error('Audio synthesis failed:', err);
-      showToast('خطا در تولید فایل صوتی.');
+      showToast(engineMode === 'online' ? 'موتور آنلاین در دسترس نبود؛ حالت آفلاین را امتحان کنید.' : 'خطا در تولید فایل صوتی.');
     } finally {
       setIsGenerating(false);
       setGenerationMessage('');
@@ -249,7 +255,7 @@ export default function App() {
               <span>ندای</span>
               <span className="text-amber-400">شیروخورشید</span>
             </h1>
-            <p className="text-[10px] text-slate-400 -mt-0.5">استودیو آفلاین تبدیل متن به گفتار</p>
+            <p className="text-[10px] text-slate-400 -mt-0.5">استودیو هوشمند تبدیل متن به گفتار</p>
           </div>
         </div>
 
@@ -270,13 +276,14 @@ export default function App() {
           voicePack.stage === 'ready'
             ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-200'
             : voicePack.stage === 'error'
+
               ? 'border-rose-500/35 bg-rose-500/10 text-rose-100'
               : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
         }`}
         role="status"
       >
         <span className="leading-relaxed">
-          {voicePack.message}
+          {engineMode === 'online' ? 'حالت آنلاین آماده است؛ متن برای تولید صدا به موتور رایگان آوا ارسال می‌شود.' : voicePack.message}
           {voicePack.stage === 'downloading' && voicePack.total > 0
             ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
             : ''}
@@ -422,17 +429,49 @@ export default function App() {
           </div>
         </div>
 
-        {/* 4. Action Button: ساختن فایل صوتی */}
+        {/* 4. Engine Selection */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs px-0.5">
+            <span className="font-semibold text-slate-200">موتور تولید صدا:</span>
+            <span className="text-[10px] text-slate-500">بدون API پولی</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setEngineMode('online')}
+              className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'online' ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs">آنلاین · آوا</span>
+                {engineMode === 'online' && <Check className="h-3.5 w-3.5" />}
+              </div>
+              <p className="mt-0.5 text-[9px] opacity-70">کیفیت بالاتر · اینترنت لازم</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setEngineMode('offline')}
+              className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'offline' ? 'border-emerald-400/60 bg-emerald-400/10 text-emerald-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs">آفلاین · Piper</span>
+                {engineMode === 'offline' && <Check className="h-3.5 w-3.5" />}
+              </div>
+              <p className="mt-0.5 text-[9px] opacity-70">خصوصی · بدون اینترنت</p>
+            </button>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
           <span>
-            {CHARACTERS.find((item) => item.id === selectedCharacter)?.name} ·{' '}
-            {TONES.find((item) => item.id === selectedTone)?.description}
+            {engineMode === 'online' ? 'آوا آنلاین · یک صدای فارسی طبیعی' : `${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · ${TONES.find((item) => item.id === selectedTone)?.description}`}
           </span>
-          <span className="shrink-0 text-emerald-400">پردازش روی دستگاه</span>
+          <span className={`shrink-0 ${engineMode === 'online' ? 'text-cyan-300' : 'text-emerald-400'}`}>
+            {engineMode === 'online' ? 'رایگان آنلاین' : voicePack.stage === 'ready' ? 'کاملاً آفلاین' : 'نیازمند آماده‌سازی'}
+          </span>
         </div>
         <button
           type="button"
-          disabled={isGenerating || !text.trim() || voicePack.stage !== 'ready'}
+          disabled={isGenerating || !text.trim() || (engineMode === 'offline' && voicePack.stage !== 'ready')}
           onClick={() => handleGenerateAudio(1.0, 1.0)}
           className="flex w-full items-center justify-center gap-2.5 rounded-2xl border border-amber-400/50 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 py-3.5 px-6 font-bold text-slate-950 shadow-xl shadow-amber-500/20 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-apk:
-    name: Build offline Android APK
+    name: Build Android APK — Hybrid TTS
     runs-on: ubuntu-latest
 
     steps:
