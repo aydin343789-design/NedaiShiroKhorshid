@@ -510,9 +510,11 @@ function prepareProsodyText(text: string, toneId: ToneId): string {
 async function phonemize(text: string, config: PiperConfig): Promise<string[]> {
   return new Promise(async (resolve, reject) => {
     let settled = false;
+    let timeout: number | undefined;
     const settle = (callback: () => void) => {
       if (!settled) {
         settled = true;
+        if (timeout !== undefined) window.clearTimeout(timeout);
         callback();
       }
     };
@@ -529,7 +531,9 @@ async function phonemize(text: string, config: PiperConfig): Promise<string[]> {
             // Emscripten may print diagnostics before the phoneme JSON payload.
           }
         },
-        printErr: (message: string) => settle(() => reject(new Error(message))),
+        // Piper/eSpeak can emit harmless diagnostics before the JSON payload.
+        // Do not turn every stderr line into a synthesis failure.
+        printErr: () => {},
         locateFile: (fileName: string) => {
           if (fileName.endsWith('.wasm')) return PIPER_WASM_PATH;
           if (fileName.endsWith('.data')) return PIPER_DATA_PATH;
@@ -545,6 +549,9 @@ async function phonemize(text: string, config: PiperConfig): Promise<string[]> {
         '--espeak_data',
         '/espeak-ng-data',
       ]);
+      timeout = window.setTimeout(() => {
+        settle(() => reject(new Error('آوانگاری متن فارسی در زمان مجاز کامل نشد.')));
+      }, 12_000);
     } catch (error) {
       settle(() => reject(error));
     }
@@ -563,8 +570,8 @@ async function synthesizeChunk(
   const inference = voice.config.inference;
 
   const feeds: Record<string, ort.Tensor> = {
-    input: new ort.Tensor('int64', phonemeIds as unknown as string[], [1, phonemeIds.length]),
-    input_lengths: new ort.Tensor('int64', [phonemeIds.length] as unknown as string[], [1]),
+    input: new ort.Tensor('int64', BigInt64Array.from(phonemeIds, (id) => BigInt(Number(id))), [1, phonemeIds.length]),
+    input_lengths: new ort.Tensor('int64', BigInt64Array.from([phonemeIds.length], (value) => BigInt(value)), [1]),
     scales: new ort.Tensor('float32', [
       Math.max(0.2, Math.min(1.5, inference.noise_scale * tone.noiseScale)),
       Math.max(0.5, Math.min(1.75, inference.length_scale / rate)),
@@ -573,7 +580,7 @@ async function synthesizeChunk(
   };
 
   if (Object.keys(voice.config.speaker_id_map || {}).length > 0) {
-    feeds.sid = new ort.Tensor('int64', [0] as unknown as string[], [1]);
+    feeds.sid = new ort.Tensor('int64', BigInt64Array.from([0], (value) => BigInt(value)), [1]);
   }
 
   const output = await voice.session.run(feeds);

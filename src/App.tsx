@@ -119,16 +119,24 @@ export default function App() {
 
       const charObj = CHARACTERS.find((c) => c.id === selectedCharacter);
       const toneObj = TONES.find((t) => t.id === selectedTone);
-      const characterName = engineMode === 'online'
+      let usedEngine: 'online' | 'offline' = engineMode;
+      let characterName = engineMode === 'online'
         ? 'آوا آنلاین (فارسی)'
         : `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
       const toneName = toneObj?.name || 'طبیعی';
 
       // Normalized text according to Persian rules
       const cleanText = normalizePersianText(text.trim());
-      const synth = engineMode === 'online'
-        ? await synthesizePersianOnlineAudio(cleanText, speed, (progress) => setGenerationMessage(progress.message))
-        : await synthesizePersianNeuralAudio(
+      let synth;
+      if (engineMode === 'online') {
+        try {
+          synth = await synthesizePersianOnlineAudio(cleanText, speed, (progress) => setGenerationMessage(progress.message));
+        } catch (onlineError) {
+          console.warn('Online TTS failed; falling back to offline engine.', onlineError);
+          usedEngine = 'offline';
+          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · پشتیبان آفلاین`;
+          setGenerationMessage('موتور آنلاین پاسخ نداد؛ در حال استفاده از موتور آفلاین…');
+          synth = await synthesizePersianNeuralAudio(
             cleanText,
             selectedCharacter,
             selectedTone,
@@ -136,6 +144,17 @@ export default function App() {
             pitch,
             (progress) => setGenerationMessage(progress.message)
           );
+        }
+      } else {
+        synth = await synthesizePersianNeuralAudio(
+          cleanText,
+          selectedCharacter,
+          selectedTone,
+          speed,
+          pitch,
+          (progress) => setGenerationMessage(progress.message)
+        );
+      }
 
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now
@@ -165,7 +184,7 @@ export default function App() {
       setCurrentScreen('player');
     } catch (err: any) {
       console.error('Audio synthesis failed:', err);
-      showToast(engineMode === 'online' ? 'موتور آنلاین در دسترس نبود؛ حالت آفلاین را امتحان کنید.' : 'خطا در تولید فایل صوتی.');
+      showToast(engineMode === 'online' ? 'موتورهای آنلاین و آفلاین در دسترس نبودند.' : 'خطا در تولید فایل صوتی.');
     } finally {
       setIsGenerating(false);
       setGenerationMessage('');
