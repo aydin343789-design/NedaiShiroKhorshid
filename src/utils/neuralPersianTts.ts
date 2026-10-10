@@ -1,6 +1,7 @@
 import * as ort from 'onnxruntime-web';
 import { createPiperPhonemize } from '../vendor/piperPhonemize.js';
 import type { CharacterId, ToneId } from '../types';
+import { normalizePersianText } from './persianNormalizer';
 
 /**
  * Fully client-side Persian neural speech engine.
@@ -143,8 +144,8 @@ interface ToneProfile {
 const TONE_PROFILES: Record<ToneId, ToneProfile> = {
   cheerful: {
     inferenceRate: 0.82,
-    noiseScale: 1.12,
-    noiseWidth: 1.08,
+    noiseScale: 0.82,
+    noiseWidth: 0.82,
     semitones: 2.0,
     lowShelfDb: -1.0,
     highShelfDb: 3.0,
@@ -165,8 +166,8 @@ const TONE_PROFILES: Record<ToneId, ToneProfile> = {
   },
   sad: {
     inferenceRate: 0.62,
-    noiseScale: 0.60,
-    noiseWidth: 0.54,
+    noiseScale: 0.76,
+    noiseWidth: 0.76,
     semitones: -2.5,
     lowShelfDb: 2.4,
     highShelfDb: -3.6,
@@ -198,8 +199,8 @@ const TONE_PROFILES: Record<ToneId, ToneProfile> = {
   },
   epic: {
     inferenceRate: 0.64,
-    noiseScale: 1.08,
-    noiseWidth: 1.08,
+    noiseScale: 0.84,
+    noiseWidth: 0.84,
     semitones: -2.0,
     lowShelfDb: 3.2,
     highShelfDb: -1.4,
@@ -479,7 +480,7 @@ function splitTextForPiper(text: string, maxLength = 220): string[] {
 
 /** Adds restrained, tone-specific punctuation without changing the words. */
 function prepareProsodyText(text: string, toneId: ToneId): string {
-  const normalized = text.replace(/[ \t]+/g, ' ').trim();
+  const normalized = normalizePersianText(text).replace(/[ \t]+/g, ' ').trim();
   // Keep ZWNJ (half-space) intact: «می‌روم» must stay one connected word.
   // Do not invent commas between ordinary words; only the user's punctuation
   // controls the pause plan.

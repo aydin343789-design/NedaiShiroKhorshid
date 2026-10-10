@@ -1,11 +1,13 @@
 import { audioBufferToMp3 } from './neuralPersianTts';
 import type { NeuralAudioResult, SynthesisProgress } from './neuralPersianTts';
+import { normalizePersianText } from './persianNormalizer';
 
 /** Free online Persian neural TTS using the public Ava Persian TTS Space. */
 const AVA_SPACE = 'https://xmanii-ava-persian-tts.hf.space';
 const GENERATE_ENDPOINT = `${AVA_SPACE}/gradio_api/call/generate`;
 const REQUEST_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 3;
+const MAX_TEXT_CHARS = 1800;
 const AUDIO_CACHE = 'nedaye-shirokhorshid-tts-audio-v1';
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -77,9 +79,7 @@ async function waitForGradioResult(eventId: string): Promise<unknown> {
     method: 'GET',
     headers: { Accept: 'text/event-stream' },
   });
-  if (!response.ok || !response.body) {
-    throw new Error(`سرویس آنلاین پاسخ مناسبی نداد (${response.status}).`);
-  }
+  if (!response.ok || !response.body) throw new Error(`سرویس آنلاین پاسخ مناسبی نداد (${response.status}).`);
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -88,9 +88,7 @@ async function waitForGradioResult(eventId: string): Promise<unknown> {
   while (true) {
     const { value, done } = await Promise.race([
       reader.read(),
-      wait(REQUEST_TIMEOUT_MS).then(() => {
-        throw new Error('زمان دریافت پاسخ صوتی آنلاین تمام شد.');
-      }),
+      wait(REQUEST_TIMEOUT_MS).then(() => { throw new Error('زمان دریافت پاسخ صوتی آنلاین تمام شد.'); }),
     ]);
     buffer += decoder.decode(value || new Uint8Array());
     const lines = buffer.split(/\r?\n/);
@@ -105,22 +103,12 @@ async function waitForGradioResult(eventId: string): Promise<unknown> {
       const payload = line.slice(5).trim();
       if (!payload || payload === '[DONE]') continue;
       let parsed: unknown;
-      try {
-        parsed = JSON.parse(payload);
-      } catch {
-        continue;
-      }
-      if (Array.isArray(parsed) && parsed[0] === null) {
-        throw new Error('سرویس آنلاین نتوانست متن را تولید کند.');
-      }
+      try { parsed = JSON.parse(payload); } catch { continue; }
+      if (Array.isArray(parsed) && parsed[0] === null) throw new Error('سرویس آنلاین نتوانست متن را تولید کند.');
       const serialized = JSON.stringify(parsed);
-      if (lastEvent === 'complete' && (serialized.includes('path') || serialized.includes('url') || serialized.includes('data'))) {
-        return parsed;
-      }
+      if (lastEvent === 'complete' && (serialized.includes('path') || serialized.includes('url') || serialized.includes('data'))) return parsed;
       if (lastEvent === 'error') {
-        const message = parsed && typeof parsed === 'object' && 'message' in parsed
-          ? String((parsed as { message?: unknown }).message ?? '')
-          : '';
+        const message = parsed && typeof parsed === 'object' && 'message' in parsed ? String((parsed as { message?: unknown }).message ?? '') : '';
         throw new Error(message || 'تولید صدای آنلاین با خطا متوقف شد.');
       }
     }
@@ -161,16 +149,26 @@ function float32ToWavBlob(samples: number[], sampleRate: number): Blob {
   }
   const buffer = new ArrayBuffer(44 + pcm.length * 2);
   const view = new DataView(buffer);
-  const write = (offset: number, value: string) => {
-    for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i));
-  };
+  const write = (offset: number, value: string) => { for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i)); };
   write(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true); write(8, 'WAVE');
-  write(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, pcm.length * 2, true);
-  new Uint8Array(buffer, 44).set(new Uint8Array(pcm.buffer));
+  write(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  write(36, 'data'); view.setUint32(40, pcm.length * 2, true); new Uint8Array(buffer, 44).set(new Uint8Array(pcm.buffer));
   return new Blob([buffer], { type: 'audio/wav' });
+}
+
+function normalizeLoudnessInPlace(audio: AudioBuffer): void {
+  let sumSquares = 0; let count = 0; let peak = 0;
+  for (let channel = 0; channel < audio.numberOfChannels; channel += 1) {
+    const data = audio.getChannelData(channel);
+    for (const value of data) { sumSquares += value * value; count += 1; peak = Math.max(peak, Math.abs(value)); }
+  }
+  if (!count || peak < 1e-5) return;
+  const gain = Math.min(0.92 / peak, Math.min(3.0, 0.12 / Math.max(Math.sqrt(sumSquares / count), 1e-5)));
+  for (let channel = 0; channel < audio.numberOfChannels; channel += 1) {
+    const data = audio.getChannelData(channel);
+    for (let i = 0; i < data.length; i += 1) data[i] *= gain;
+  }
 }
 
 export async function synthesizePersianOnlineAudio(
@@ -178,11 +176,12 @@ export async function synthesizePersianOnlineAudio(
   speed = 1,
   callback?: (progress: SynthesisProgress) => void,
 ): Promise<NeuralAudioResult> {
-  const cleanText = text.trim();
+  const cleanText = normalizePersianText(text).trim();
   if (!cleanText) throw new Error('متنی برای خوانش وارد نشده است.');
+  if (cleanText.length > MAX_TEXT_CHARS) throw new Error(`برای پایداری بهتر، متن آنلاین را به بخش‌های حداکثر ${MAX_TEXT_CHARS} نویسه‌ای تقسیم کنید.`);
   report(callback, 0, 3, 'اتصال به موتور آنلاین فارسی…');
 
-  const clampedSpeed = Math.max(0.5, Math.min(2.0, speed));
+  const clampedSpeed = Math.max(0.75, Math.min(1.25, speed));
   const key = await cacheKey(cleanText, clampedSpeed);
   const audioCache = await caches.open(AUDIO_CACHE);
   const cached = await audioCache.match(key);
@@ -196,14 +195,11 @@ export async function synthesizePersianOnlineAudio(
   let response: Response;
   try {
     response = await requestWithRetry(GENERATE_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ data: [cleanText, clampedSpeed, true, 120] }),
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('زمان پاسخ موتور آنلاین تمام شد؛ حالت آفلاین فعال می‌شود.');
-    }
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('زمان پاسخ موتور آنلاین تمام شد؛ حالت آفلاین فعال می‌شود.');
     throw new Error('اتصال به موتور آنلاین برقرار نشد؛ حالت آفلاین فعال می‌شود.');
   }
   if (!response.ok) throw new Error(`سرویس آنلاین در دسترس نیست (${response.status}).`);
@@ -215,13 +211,12 @@ export async function synthesizePersianOnlineAudio(
   report(callback, 2, 3, 'دریافت و آماده‌سازی فایل صوتی…');
 
   const rawBlob = await responseToBlob(result);
-  const blob = rawBlob.type === 'audio/mpeg'
-    ? rawBlob
-    : await (async () => {
-        const decoder = new OfflineAudioContext(1, 1, 24000);
-        const audio = await decoder.decodeAudioData(await rawBlob.arrayBuffer());
-        return await audioBufferToMp3(audio);
-      })();
+  const blob = rawBlob.type === 'audio/mpeg' ? rawBlob : await (async () => {
+    const decoder = new OfflineAudioContext(1, 1, 24000);
+    const audio = await decoder.decodeAudioData(await rawBlob.arrayBuffer());
+    normalizeLoudnessInPlace(audio);
+    return await audioBufferToMp3(audio);
+  })();
   await audioCache.put(key, new Response(blob, { headers: { 'content-type': 'audio/mpeg' } }));
   const audioUrl = URL.createObjectURL(blob);
   const duration = await readAudioDuration(audioUrl);
