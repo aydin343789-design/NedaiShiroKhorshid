@@ -123,7 +123,7 @@ export default function App() {
       let characterName = engineMode === 'online'
         ? 'آوا آنلاین (فارسی)'
         : `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
-      const toneName = toneObj?.name || 'طبیعی';
+      let toneName = engineMode === 'online' ? 'پیش‌فرض موتور آنلاین' : (toneObj?.name || 'طبیعی');
 
       // Normalized text according to Persian rules
       const cleanText = normalizePersianText(text.trim());
@@ -135,6 +135,7 @@ export default function App() {
           console.warn('Online TTS failed; falling back to offline engine.', onlineError);
           usedEngine = 'offline';
           characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · پشتیبان آفلاین`;
+          toneName = toneObj?.name || 'طبیعی';
           setGenerationMessage('موتور آنلاین پاسخ نداد؛ در حال استفاده از موتور آفلاین…');
           synth = await synthesizePersianNeuralAudio(
             cleanText,
@@ -407,6 +408,11 @@ export default function App() {
               );
             })}
           </div>
+          {engineMode === 'online' && (
+            <p className="px-0.5 text-[10px] leading-relaxed text-cyan-200/80">
+              در حالت آنلاین، موتور آوا از صدای پیش‌فرض خودش استفاده می‌کند؛ انتخاب گوینده و لحن فقط در حالت آفلاین اعمال می‌شود.
+            </p>
+          )}
         </div>
 
         {/* 3. Text Box with 1 default sample */}
