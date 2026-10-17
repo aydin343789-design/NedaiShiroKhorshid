@@ -132,7 +132,9 @@ async function waitForGradioResult(eventId: string): Promise<unknown> {
       if (done) break;
     }
   } finally {
-    reader.releaseLock();
+    // A timed-out read may still be settling while cancellation propagates.
+    // Do not let lock cleanup hide the original timeout/network error.
+    try { reader.releaseLock(); } catch { /* stream cancellation is still settling */ }
   }
   throw new Error('پاسخ صوتی سرویس آنلاین ناقص بود.');
 }
