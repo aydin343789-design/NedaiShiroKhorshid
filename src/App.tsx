@@ -48,6 +48,7 @@ export default function App() {
   const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState<string>(() => {
     try { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; } catch { return ''; }
   });
+  const [isTestingApiKey, setIsTestingApiKey] = useState(false);
   const [text, setText] = useState<string>(DEFAULT_SAMPLE_TEXT);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [activeClip, setActiveClip] = useState<SavedAudioClip | null>(null);
@@ -106,7 +107,36 @@ export default function App() {
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 4500);
+  };
+
+  const saveApiKey = () => {
+    const nextKey = geminiApiKeyDraft.trim();
+    try {
+      if (nextKey) localStorage.setItem(GEMINI_KEY_STORAGE, nextKey);
+      else localStorage.removeItem(GEMINI_KEY_STORAGE);
+      setGeminiApiKey(nextKey);
+      setGeminiApiKeyDraft(nextKey);
+      showToast(nextKey ? 'کلید آنلاین ذخیره شد.' : 'کلید آنلاین پاک شد.');
+    } catch {
+      showToast('ذخیرهٔ کلید در این دستگاه ممکن نشد.');
+    }
+  };
+
+  const testApiKey = async () => {
+    const key = geminiApiKey.trim();
+    if (!key) { showToast('ابتدا کلید را ذخیره کنید.'); return; }
+    setIsTestingApiKey(true);
+    try {
+      const result = await synthesizePersianOnlineAudio('سلام، این یک آزمایش کوتاه صدای آنلاین است.', 'female', 'cheerful', 1, key);
+      URL.revokeObjectURL(result.audioUrl);
+      showToast('اتصال آنلاین موفق بود.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'خطای ناشناخته';
+      showToast(message.length > 100 ? message.slice(0, 97) + '…' : message);
+    } finally {
+      setIsTestingApiKey(false);
+    }
   };
 
   // Generate Audio via High-Quality Persian Neural & MP3 Engine
@@ -258,6 +288,7 @@ export default function App() {
 
     return (
       <>
+        {toastMessage && <div className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded-xl border border-amber-500/40 bg-slate-900/95 px-4 py-2 text-xs font-medium text-amber-100 shadow-xl">{toastMessage}</div>}
         <AudioPlayerScreen
           clip={activeClip}
           onBack={() => {
@@ -276,6 +307,12 @@ export default function App() {
           onDownloadClip={handleDownload}
           onDeleteClip={handleDeleteClip}
           onClearHistory={handleClearHistory}
+          apiKey={geminiApiKey}
+          apiKeyDraft={geminiApiKeyDraft}
+          onApiKeyDraftChange={setGeminiApiKeyDraft}
+          onSaveApiKey={saveApiKey}
+          onTestApiKey={testApiKey}
+          isTestingApiKey={isTestingApiKey}
         />
       </>
     );
@@ -314,37 +351,6 @@ export default function App() {
           <Menu className="h-5 w-5" />
         </button>
       </header>
-
-      {/* First-launch model download and persistent offline readiness */}
-      <section
-        className={`mx-auto mt-2 flex w-full max-w-xl items-center justify-between gap-3 rounded-xl border px-3 py-2 text-[11px] sm:text-xs ${
-          voicePack.stage === 'ready'
-            ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-200'
-            : voicePack.stage === 'error'
-
-              ? 'border-rose-500/35 bg-rose-500/10 text-rose-100'
-              : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-        }`}
-        role="status"
-      >
-        <span className="leading-relaxed">
-          {engineMode === 'online' ? (geminiApiKey ? 'Gemini آماده است؛ صدای انتخابی و لحن انتخابی به موتور آنلاین ارسال می‌شود.' : 'برای موتور آنلاین Gemini کلید API لازم است؛ بدون کلید از موتور آفلاین استفاده می‌شود.') : voicePack.message}
-          {voicePack.stage === 'downloading' && voicePack.total > 0
-            ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
-            : ''}
-        </span>
-        {voicePack.stage === 'error' ? (
-          <button
-            type="button"
-            onClick={prepareVoicePack}
-            className="shrink-0 rounded-lg border border-rose-300/50 px-2 py-1 font-bold text-rose-100 transition-colors hover:bg-rose-400/15"
-          >
-            تلاش دوباره
-          </button>
-        ) : voicePack.stage === 'ready' ? (
-          <span className="shrink-0 font-bold text-emerald-300">کاملاً آفلاین</span>
-        ) : null}
-      </section>
 
       {/* Main Workspace (Strictly fitted, no scroll) */}
       <main className="flex flex-1 flex-col justify-between py-2 max-w-xl mx-auto w-full gap-2.5">
@@ -483,7 +489,7 @@ export default function App() {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs px-0.5">
             <span className="font-semibold text-slate-200">موتور تولید صدا:</span>
-            <span className="text-[10px] text-slate-500">سهمیهٔ رایگان ممکن است؛ محدودیت و هزینه را بررسی کن</span>
+            
           </div>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -492,10 +498,10 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'online' ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">آنلاین · Gemini TTS</span>
+                <span className="font-bold text-xs">آنلاین</span>
                 {engineMode === 'online' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">لحن‌های قابل‌کنترل · کلید API لازم</p>
+              <p className="mt-0.5 text-[9px] opacity-70">با اینترنت</p>
             </button>
             <button
               type="button"
@@ -503,55 +509,21 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'offline' ? 'border-emerald-400/60 bg-emerald-400/10 text-emerald-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">آفلاین · Piper</span>
+                <span className="font-bold text-xs">آفلاین</span>
                 {engineMode === 'offline' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">خصوصی · بدون اینترنت</p>
+              <p className="mt-0.5 text-[9px] opacity-70">بدون اینترنت</p>
             </button>
           </div>
-          {engineMode === 'online' && (
-            <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-2 space-y-1.5">
-              <div className="flex gap-1.5">
-                <input
-                  type="password"
-                  dir="ltr"
-                  autoComplete="off"
-                  value={geminiApiKeyDraft}
-                  onChange={(event) => setGeminiApiKeyDraft(event.target.value)}
-                  placeholder="Gemini API key (AIza…)"
-                  className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-[11px] text-slate-100 outline-none focus:border-cyan-400"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const nextKey = geminiApiKeyDraft.trim();
-                    try {
-                      if (nextKey) localStorage.setItem(GEMINI_KEY_STORAGE, nextKey);
-                      else localStorage.removeItem(GEMINI_KEY_STORAGE);
-                      setGeminiApiKey(nextKey);
-                      setGeminiApiKeyDraft(nextKey);
-                      showToast(nextKey ? 'کلید Gemini فقط روی همین دستگاه ذخیره شد.' : 'کلید Gemini از این دستگاه پاک شد.');
-                    } catch {
-                      showToast('ذخیرهٔ کلید در این دستگاه ممکن نشد.');
-                    }
-                  }}
-                  className="shrink-0 rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-[10px] font-bold text-cyan-100"
-                >ذخیره</button>
-              </div>
-              <p className="text-[9px] leading-relaxed text-slate-400">
-                <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer" className="text-cyan-300 underline">دریافت کلید از Google AI Studio</a>
-                {' · '}کلید در همین دستگاه می‌ماند و داخل APK قرار نمی‌گیرد. سهمیهٔ رایگان تضمین‌شده نیست؛ مصرف ممکن است هزینه داشته باشد. در طرح رایگان، متن ارسالی ممکن است برای بهبود سرویس استفاده شود؛ متن حساس نفرست.
-              </p>
-            </div>
-          )}
+
         </div>
 
         <div className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
           <span>
-            {engineMode === 'online' ? `Gemini TTS · ${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · ${TONES.find((item) => item.id === selectedTone)?.name}` : `${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · ${TONES.find((item) => item.id === selectedTone)?.description}`}
+            `گوینده: ${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · لحن: ${TONES.find((item) => item.id === selectedTone)?.name}`
           </span>
           <span className={`shrink-0 ${engineMode === 'online' ? 'text-cyan-300' : 'text-emerald-400'}`}>
-            {engineMode === 'online' ? (geminiApiKey ? 'کلید ذخیره شده' : 'کلید لازم است') : voicePack.stage === 'ready' ? 'کاملاً آفلاین' : 'نیازمند آماده‌سازی'}
+            {engineMode === 'online' ? (geminiApiKey ? 'آنلاین' : 'کلید لازم است') : voicePack.stage === 'ready' ? 'آفلاین آماده' : 'در حال آماده‌سازی'}
           </span>
         </div>
         <button
@@ -583,6 +555,12 @@ export default function App() {
         onDownloadClip={handleDownload}
         onDeleteClip={handleDeleteClip}
         onClearHistory={handleClearHistory}
+          apiKey={geminiApiKey}
+          apiKeyDraft={geminiApiKeyDraft}
+          onApiKeyDraftChange={setGeminiApiKeyDraft}
+          onSaveApiKey={saveApiKey}
+          onTestApiKey={testApiKey}
+          isTestingApiKey={isTestingApiKey}
       />
     </div>
   );
