@@ -11,6 +11,7 @@ import {
   Newspaper,
   Briefcase,
   Flame,
+  Radio,
 } from 'lucide-react';
 import { LionSunEmblem } from './components/LionSunEmblem';
 import { HistoryDrawer } from './components/HistoryDrawer';
@@ -25,6 +26,7 @@ import {
 import { synthesizePersianOnlineAudio } from './utils/onlinePersianTts';
 
 const STORAGE_KEY = 'nedaye_shirokhorshid_history_v4';
+const GEMINI_KEY_STORAGE = 'nedaye_gemini_api_key_v1';
 
 const TONE_ICONS: Record<ToneId, React.ReactNode> = {
   cheerful: <Smile className="h-3.5 w-3.5" />,
@@ -32,6 +34,7 @@ const TONE_ICONS: Record<ToneId, React.ReactNode> = {
   sad: <CloudRain className="h-3.5 w-3.5" />,
   formal: <Newspaper className="h-3.5 w-3.5" />,
   professional: <Briefcase className="h-3.5 w-3.5" />,
+  newscast: <Radio className="h-3.5 w-3.5" />,
   epic: <Flame className="h-3.5 w-3.5" />,
 };
 
@@ -39,6 +42,13 @@ export default function App() {
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterId>('female');
   const [selectedTone, setSelectedTone] = useState<ToneId>('cheerful');
   const [engineMode, setEngineMode] = useState<'offline' | 'online'>('online');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
+    try { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; } catch { return ''; }
+  });
+  const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState<string>(() => {
+    try { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; } catch { return ''; }
+  });
+  const [isTestingApiKey, setIsTestingApiKey] = useState(false);
   const [text, setText] = useState<string>(DEFAULT_SAMPLE_TEXT);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [activeClip, setActiveClip] = useState<SavedAudioClip | null>(null);
@@ -97,7 +107,36 @@ export default function App() {
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 4500);
+  };
+
+  const saveApiKey = () => {
+    const nextKey = geminiApiKeyDraft.trim();
+    try {
+      if (nextKey) localStorage.setItem(GEMINI_KEY_STORAGE, nextKey);
+      else localStorage.removeItem(GEMINI_KEY_STORAGE);
+      setGeminiApiKey(nextKey);
+      setGeminiApiKeyDraft(nextKey);
+      showToast(nextKey ? 'کلید آنلاین ذخیره شد.' : 'کلید آنلاین پاک شد.');
+    } catch {
+      showToast('ذخیرهٔ کلید در این دستگاه ممکن نشد.');
+    }
+  };
+
+  const testApiKey = async () => {
+    const key = geminiApiKey.trim();
+    if (!key) { showToast('ابتدا کلید را ذخیره کنید.'); return; }
+    setIsTestingApiKey(true);
+    try {
+      const result = await synthesizePersianOnlineAudio('سلام، این یک آزمایش کوتاه صدای آنلاین است.', 'female', 'cheerful', 1, key);
+      URL.revokeObjectURL(result.audioUrl);
+      showToast('اتصال آنلاین موفق بود.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'خطای ناشناخته';
+      showToast(message.length > 100 ? message.slice(0, 97) + '…' : message);
+    } finally {
+      setIsTestingApiKey(false);
+    }
   };
 
   // Generate Audio via High-Quality Persian Neural & MP3 Engine
@@ -120,20 +159,29 @@ export default function App() {
       const toneObj = TONES.find((t) => t.id === selectedTone);
       let usedEngine: 'online' | 'offline' = engineMode;
       let characterName = engineMode === 'online'
-        ? 'آوا آنلاین (فارسی)'
+        ? `موتور آنلاین · ${charObj?.name || 'گوینده'}`
         : `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
-      let toneName = engineMode === 'online' ? 'پیش‌فرض موتور آنلاین' : (toneObj?.name || 'طبیعی');
+      let toneName = toneObj?.name || 'طبیعی';
 
       // Keep the user's original wording. Each engine applies its own text frontend;
       // Ava must not receive Piper's manual pronunciation spellings.
       const cleanText = text.trim();
-      const canUseOnlineVoice = engineMode === 'online' && selectedCharacter === 'female' && selectedTone === 'cheerful';
+      const canUseOnlineVoice = engineMode === 'online' && Boolean(geminiApiKey.trim());
       let synth;
       if (canUseOnlineVoice) {
         try {
-          synth = await synthesizePersianOnlineAudio(cleanText, speed, (progress) => setGenerationMessage(progress.message));
+          synth = await synthesizePersianOnlineAudio(
+            cleanText,
+            selectedCharacter,
+            selectedTone,
+            speed,
+            geminiApiKey,
+            (progress) => setGenerationMessage(progress.message),
+          );
         } catch (onlineError) {
           console.warn('Online TTS failed; falling back to offline engine.', onlineError);
+          const reason = onlineError instanceof Error ? onlineError.message : 'خطای نامشخص';
+          showToast(`خطای آنلاین: ${reason.slice(0, 85)}؛ خروجی آفلاین ساخته شد.`);
           usedEngine = 'offline';
           characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · پشتیبان آفلاین`;
           toneName = toneObj?.name || 'طبیعی';
@@ -151,9 +199,9 @@ export default function App() {
       } else {
         if (engineMode === 'online') {
           usedEngine = 'offline';
-          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین برای حفظ جنس صدا`;
+          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین (کلید آنلاین تنظیم نشده)`;
           toneName = toneObj?.name || 'طبیعی';
-          setGenerationMessage('موتور آنلاین فقط یک صدای ثابت دارد؛ در حال آماده‌سازی صدای انتخاب‌شده به‌صورت آفلاین…');
+          setGenerationMessage('کلید موتور آنلاین را از منوی سه‌خطی ذخیره کن؛ فعلاً صدای انتخابی به‌صورت آفلاین ساخته می‌شود…');
           await prepareOfflineVoicePack(setVoicePack, selectedCharacter);
         }
         synth = await synthesizePersianNeuralAudio(
@@ -242,6 +290,7 @@ export default function App() {
 
     return (
       <>
+        {toastMessage && <div className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded-xl border border-amber-500/40 bg-slate-900/95 px-4 py-2 text-xs font-medium text-amber-100 shadow-xl">{toastMessage}</div>}
         <AudioPlayerScreen
           clip={activeClip}
           onBack={() => {
@@ -260,6 +309,12 @@ export default function App() {
           onDownloadClip={handleDownload}
           onDeleteClip={handleDeleteClip}
           onClearHistory={handleClearHistory}
+          apiKey={geminiApiKey}
+          apiKeyDraft={geminiApiKeyDraft}
+          onApiKeyDraftChange={setGeminiApiKeyDraft}
+          onSaveApiKey={saveApiKey}
+          onTestApiKey={testApiKey}
+          isTestingApiKey={isTestingApiKey}
         />
       </>
     );
@@ -267,7 +322,7 @@ export default function App() {
 
   // Screen 1: Create Audio Screen (Strict single-page, no scroll)
   return (
-    <div className="flex h-screen max-h-screen w-full flex-col justify-between overflow-hidden bg-[#06090e] text-slate-100 p-3 sm:p-4 select-none font-sans">
+    <div className="flex min-h-screen w-full flex-col justify-start overflow-y-auto bg-[#06090e] text-slate-100 p-3 sm:p-4 select-none font-sans">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-amber-500/40 bg-slate-900/95 px-4 py-2 text-xs font-medium text-amber-200 shadow-xl backdrop-blur-md">
@@ -299,38 +354,43 @@ export default function App() {
         </button>
       </header>
 
-      {/* First-launch model download and persistent offline readiness */}
+      {/* Offline model download status and progress must remain visible. */}
       <section
         className={`mx-auto mt-2 flex w-full max-w-xl items-center justify-between gap-3 rounded-xl border px-3 py-2 text-[11px] sm:text-xs ${
           voicePack.stage === 'ready'
             ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-200'
             : voicePack.stage === 'error'
-
               ? 'border-rose-500/35 bg-rose-500/10 text-rose-100'
               : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
         }`}
         role="status"
       >
-        <span className="leading-relaxed">
-          {engineMode === 'online' ? 'حالت آنلاین آماده است؛ متن برای تولید صدا به موتور رایگان آوا ارسال می‌شود.' : voicePack.message}
-          {voicePack.stage === 'downloading' && voicePack.total > 0
-            ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
-            : ''}
-        </span>
-        {voicePack.stage === 'error' ? (
-          <button
-            type="button"
-            onClick={prepareVoicePack}
-            className="shrink-0 rounded-lg border border-rose-300/50 px-2 py-1 font-bold text-rose-100 transition-colors hover:bg-rose-400/15"
-          >
+        <div className="min-w-0 flex-1">
+          <div className="leading-relaxed">
+            {engineMode === 'online' ? 'موتور آنلاین انتخاب شده است.' : voicePack.message}
+            {engineMode === 'offline' && voicePack.stage === 'downloading' && voicePack.total > 0
+              ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
+              : ''}
+          </div>
+          {engineMode === 'offline' && voicePack.stage === 'downloading' && (
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-full rounded-full bg-emerald-400 transition-all"
+                style={{ width: (Math.min(100, Math.round((voicePack.completed / Math.max(voicePack.total, 1)) * 100)) + '%') }}
+              />
+            </div>
+          )}
+        </div>
+        {engineMode === 'offline' && voicePack.stage === 'error' ? (
+          <button type="button" onClick={prepareVoicePack} className="shrink-0 rounded-lg border border-rose-300/50 px-2 py-1 font-bold text-rose-100">
             تلاش دوباره
           </button>
-        ) : voicePack.stage === 'ready' ? (
-          <span className="shrink-0 font-bold text-emerald-300">کاملاً آفلاین</span>
+        ) : engineMode === 'offline' && voicePack.stage === 'ready' ? (
+          <span className="shrink-0 font-bold text-emerald-300">آماده</span>
         ) : null}
       </section>
 
-      {/* Main Workspace (Strictly fitted, no scroll) */}
+      {/* Main Workspace */}
       <main className="flex flex-1 flex-col justify-between py-2 max-w-xl mx-auto w-full gap-2.5">
         {/* 1. Character Selection with Real Avatars */}
         <div className="space-y-1.5">
@@ -417,11 +477,6 @@ export default function App() {
               );
             })}
           </div>
-          {engineMode === 'online' && (
-            <p className="px-0.5 text-[10px] leading-relaxed text-cyan-200/80">
-              موتور آنلاین آوا فقط یک صدای ثابت دارد و لحن انتخابی را هم اعمال نمی‌کند؛ برای اجرای صدای گوینده یا لحن انتخابی، برنامه به‌صورت خودکار از موتور آفلاین استفاده می‌کند.
-            </p>
-          )}
         </div>
 
         {/* 3. Text Box with 1 default sample */}
@@ -467,7 +522,7 @@ export default function App() {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs px-0.5">
             <span className="font-semibold text-slate-200">موتور تولید صدا:</span>
-            <span className="text-[10px] text-slate-500">بدون API پولی</span>
+            
           </div>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -476,10 +531,10 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'online' ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">آنلاین · آوا</span>
+                <span className="font-bold text-xs">آنلاین</span>
                 {engineMode === 'online' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">کیفیت بالاتر · اینترنت لازم</p>
+              <p className="mt-0.5 text-[9px] opacity-70">با اینترنت</p>
             </button>
             <button
               type="button"
@@ -487,21 +542,17 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'offline' ? 'border-emerald-400/60 bg-emerald-400/10 text-emerald-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">آفلاین · Piper</span>
+                <span className="font-bold text-xs">آفلاین</span>
                 {engineMode === 'offline' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">خصوصی · بدون اینترنت</p>
+              <p className="mt-0.5 text-[9px] opacity-70">بدون اینترنت</p>
             </button>
           </div>
+
         </div>
 
-        <div className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
-          <span>
-            {engineMode === 'online' ? 'آوا آنلاین · یک صدای فارسی طبیعی' : `${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · ${TONES.find((item) => item.id === selectedTone)?.description}`}
-          </span>
-          <span className={`shrink-0 ${engineMode === 'online' ? 'text-cyan-300' : 'text-emerald-400'}`}>
-            {engineMode === 'online' ? 'رایگان آنلاین' : voicePack.stage === 'ready' ? 'کاملاً آفلاین' : 'نیازمند آماده‌سازی'}
-          </span>
+        <div className="rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
+          گوینده: {CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · لحن: {TONES.find((item) => item.id === selectedTone)?.name}
         </div>
         <button
           type="button"
@@ -532,6 +583,12 @@ export default function App() {
         onDownloadClip={handleDownload}
         onDeleteClip={handleDeleteClip}
         onClearHistory={handleClearHistory}
+          apiKey={geminiApiKey}
+          apiKeyDraft={geminiApiKeyDraft}
+          onApiKeyDraftChange={setGeminiApiKeyDraft}
+          onSaveApiKey={saveApiKey}
+          onTestApiKey={testApiKey}
+          isTestingApiKey={isTestingApiKey}
       />
     </div>
   );
