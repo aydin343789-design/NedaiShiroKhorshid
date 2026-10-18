@@ -127,7 +127,7 @@ export default function App() {
       // Keep the user's original wording. Each engine applies its own text frontend;
       // Ava must not receive Piper's manual pronunciation spellings.
       const cleanText = text.trim();
-      const canUseOnlineVoice = engineMode === 'online' && selectedCharacter === 'female';
+      const canUseOnlineVoice = engineMode === 'online' && selectedCharacter === 'female' && selectedTone === 'cheerful';
       let synth;
       if (canUseOnlineVoice) {
         try {
@@ -419,7 +419,7 @@ export default function App() {
           </div>
           {engineMode === 'online' && (
             <p className="px-0.5 text-[10px] leading-relaxed text-cyan-200/80">
-              موتور آنلاین آوا فقط یک صدای ثابت دارد؛ برای حفظ انتخاب صدای مردانه، کودکانه یا راوی، برنامه به‌صورت خودکار از موتور آفلاین استفاده می‌کند.
+              موتور آنلاین آوا فقط یک صدای ثابت دارد و لحن انتخابی را هم اعمال نمی‌کند؛ برای اجرای صدای گوینده یا لحن انتخابی، برنامه به‌صورت خودکار از موتور آفلاین استفاده می‌کند.
             </p>
           )}
         </div>
