@@ -1,67 +1,38 @@
 import { audioBufferToMp3 } from './neuralPersianTts';
+import type { CharacterId, ToneId } from '../types';
 import type { NeuralAudioResult, SynthesisProgress } from './neuralPersianTts';
-import { normalizePersianText } from './persianNormalizer';
 
-/** Free online Persian neural TTS using the public Ava Persian TTS Space. */
-const AVA_SPACE = 'https://xmanii-ava-persian-tts.hf.space';
-const GENERATE_ENDPOINT = `${AVA_SPACE}/gradio_api/call/generate`;
-const REQUEST_TIMEOUT_MS = 45_000;
-const MAX_ATTEMPTS = 3;
-const MAX_TEXT_CHARS = 1800;
-const AUDIO_CACHE = 'nedaye-shirokhorshid-tts-audio-v2';
+const GEMINI_TTS_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
+const GEMINI_TTS_MODEL = 'gemini-3.8-flash-lite-tts';
+const MAX_TEXT_CHARS = 3500;
 
-const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const VOICE_BY_CHARACTER: Record<CharacterId, string> = {
+  female: 'Kore',
+  male: 'Charon',
+  child: 'Leda',
+  narrator: 'Rasalgethi',
+};
 
-function isRetryableStatus(status: number) {
-  return status === 408 || status === 425 || status === 429 || status >= 500;
-}
+const STYLE_BY_TONE: Record<ToneId, string> = {
+  cheerful: 'Speak in natural Iranian Persian (Farsi), warmly cheerful, lively and smiling, with expressive but clear intonation.',
+  intimate: 'Speak in natural Iranian Persian (Farsi), warmly intimate, gentle, close and friendly, with soft measured pacing.',
+  sad: 'Speak in natural Iranian Persian (Farsi), subdued, heartfelt and sad, with restrained emotion and deliberate pauses. Do not overact.',
+  formal: 'Speak in natural Iranian Persian (Farsi), formal, respectful, measured and clearly articulated.',
+  professional: 'Speak in natural Iranian Persian (Farsi), polished, confident, composed and clear, as for a professional presentation.',
+  newscast: 'Speak in natural Iranian Persian (Farsi) as a professional news presenter: neutral, credible, precise, even-paced, crisp consonants, no theatrical emotion.',
+  epic: 'Speak in natural Iranian Persian (Farsi) as a cinematic narrator: resonant, dignified, powerful and deliberate, with dramatic but controlled pauses.',
+};
 
-async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
-async function requestWithRetry(input: RequestInfo | URL, init: RequestInit = {}) {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    try {
-      const response = await fetchWithTimeout(input, init);
-      if (response.ok || !isRetryableStatus(response.status) || attempt === MAX_ATTEMPTS - 1) return response;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-      if (attempt === MAX_ATTEMPTS - 1) throw error;
-    }
-    await wait(700 * 2 ** attempt);
-  }
-  throw lastError instanceof Error ? lastError : new Error('درخواست آنلاین ناموفق بود.');
-}
-
-async function cacheKey(text: string, speed: number) {
-  const source = `${text}\u0000${speed}`;
-  if (globalThis.crypto?.subtle) {
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
-    return `https://cache.nedaye.local/${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
-  }
-  return `https://cache.nedaye.local/${encodeURIComponent(source).slice(0, 180)}`;
-}
-
-async function readAudioDuration(url: string): Promise<number> {
-  try {
-    const audio = new Audio(url);
-    return await new Promise<number>((resolve) => {
-      const finish = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
-      audio.onloadedmetadata = finish;
-      audio.onerror = () => resolve(0);
-      window.setTimeout(finish, 1500);
-    });
-  } catch {
-    return 0;
+function characterDirection(character: CharacterId): string {
+  switch (character) {
+    case 'female':
+      return 'Use a clearly feminine adult voice.';
+    case 'male':
+      return 'Use a clearly masculine adult voice.';
+    case 'child':
+      return 'Use a youthful, childlike, bright voice; keep the words intelligible and avoid caricature.';
+    case 'narrator':
+      return 'Use a mature, deep, steady narrator voice with a storytelling presence.';
   }
 }
 
@@ -74,174 +45,110 @@ function report(
   callback?.({ completed, total, message });
 }
 
-async function readStreamChunkWithTimeout(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-): Promise<ReadableStreamReadResult<Uint8Array>> {
-  let timer: number | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = window.setTimeout(() => {
-      // Stop the pending stream read as well as reporting the timeout.
-      void reader.cancel().catch(() => undefined);
-      reject(new Error('زمان دریافت پاسخ صوتی آنلاین تمام شد.'));
-    }, REQUEST_TIMEOUT_MS);
-  });
-
-  try {
-    return await Promise.race([reader.read(), timeout]);
-  } finally {
-    if (timer !== undefined) window.clearTimeout(timer);
-  }
+function decodeBase64(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
 }
 
-async function waitForGradioResult(eventId: string): Promise<unknown> {
-  const response = await requestWithRetry(GENERATE_ENDPOINT + '/' + encodeURIComponent(eventId), {
-    method: 'GET',
-    headers: { Accept: 'text/event-stream' },
-  });
-  if (!response.ok || !response.body) throw new Error('سرویس آنلاین پاسخ مناسبی نداد (' + response.status + ').');
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let lastEvent = '';
-  try {
-    while (true) {
-      const { value, done } = await readStreamChunkWithTimeout(reader);
-      buffer += decoder.decode(value || new Uint8Array());
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('event:')) {
-          lastEvent = line.slice(6).trim();
-          continue;
-        }
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        let parsed: unknown;
-        try { parsed = JSON.parse(payload); } catch { continue; }
-        if (Array.isArray(parsed) && parsed[0] === null) throw new Error('سرویس آنلاین نتوانست متن را تولید کند.');
-        const serialized = JSON.stringify(parsed);
-        if (lastEvent === 'complete' && (serialized.includes('path') || serialized.includes('url') || serialized.includes('data'))) return parsed;
-        if (lastEvent === 'error') {
-          const message = parsed && typeof parsed === 'object' && 'message' in parsed ? String((parsed as { message?: unknown }).message ?? '') : '';
-          throw new Error(message || 'تولید صدای آنلاین با خطا متوقف شد.');
-        }
-      }
-      if (done) break;
-    }
-  } finally {
-    // A timed-out read may still be settling while cancellation propagates.
-    // Do not let lock cleanup hide the original timeout/network error.
-    try { reader.releaseLock(); } catch { /* stream cancellation is still settling */ }
-  }
-  throw new Error('پاسخ صوتی سرویس آنلاین ناقص بود.');
-}
-
-function absoluteFileUrl(value: string): string {
-  if (/^https?:\/\//i.test(value)) return value;
-  if (value.startsWith('/')) return `${AVA_SPACE}${value}`;
-  return `${AVA_SPACE}/${value}`;
-}
-
-async function responseToBlob(result: unknown): Promise<Blob> {
-  const candidate = Array.isArray(result) ? result[0] : result;
-  if (candidate && typeof candidate === 'object') {
-    const item = candidate as Record<string, unknown>;
-    const url = typeof item.url === 'string' ? item.url : undefined;
-    const path = typeof item.path === 'string' ? item.path : undefined;
-    if (url || path) {
-      const response = await requestWithRetry(absoluteFileUrl(url || path!), {});
-      if (!response.ok) throw new Error('دریافت فایل صوتی آنلاین ناموفق بود.');
-      return await response.blob();
+function findAudioData(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const steps = (payload as { steps?: unknown }).steps;
+  if (!Array.isArray(steps)) return undefined;
+  for (let stepIndex = steps.length - 1; stepIndex >= 0; stepIndex -= 1) {
+    const step = steps[stepIndex] as { type?: unknown; content?: unknown };
+    if (step.type !== 'model_output' || !Array.isArray(step.content)) continue;
+    for (let contentIndex = step.content.length - 1; contentIndex >= 0; contentIndex -= 1) {
+      const content = step.content[contentIndex] as { type?: unknown; data?: unknown };
+      if (content.type === 'audio' && typeof content.data === 'string') return content.data;
     }
   }
-  if (Array.isArray(candidate) && candidate.length >= 2 && typeof candidate[0] === 'number') {
-    return float32ToWavBlob(candidate[1] as number[], candidate[0] as number);
-  }
-  throw new Error('فرمت خروجی صوتی سرویس آنلاین ناشناخته است.');
+  return undefined;
 }
 
-function float32ToWavBlob(samples: number[], sampleRate: number): Blob {
-  const pcm = new Int16Array(samples.length);
-  for (let i = 0; i < samples.length; i += 1) {
-    const value = Math.max(-1, Math.min(1, Number(samples[i]) || 0));
-    pcm[i] = value < 0 ? value * 0x8000 : value * 0x7fff;
-  }
-  const buffer = new ArrayBuffer(44 + pcm.length * 2);
-  const view = new DataView(buffer);
-  const write = (offset: number, value: string) => { for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i)); };
-  write(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true); write(8, 'WAVE');
-  write(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-  write(36, 'data'); view.setUint32(40, pcm.length * 2, true); new Uint8Array(buffer, 44).set(new Uint8Array(pcm.buffer));
-  return new Blob([buffer], { type: 'audio/wav' });
-}
-
-function normalizeLoudnessInPlace(audio: AudioBuffer): void {
-  let sumSquares = 0; let count = 0; let peak = 0;
-  for (let channel = 0; channel < audio.numberOfChannels; channel += 1) {
-    const data = audio.getChannelData(channel);
-    for (const value of data) { sumSquares += value * value; count += 1; peak = Math.max(peak, Math.abs(value)); }
-  }
-  if (!count || peak < 1e-5) return;
-  const gain = Math.min(0.92 / peak, Math.min(3.0, 0.12 / Math.max(Math.sqrt(sumSquares / count), 1e-5)));
-  for (let channel = 0; channel < audio.numberOfChannels; channel += 1) {
-    const data = audio.getChannelData(channel);
-    for (let i = 0; i < data.length; i += 1) data[i] *= gain;
-  }
-}
-
+/**
+ * Expressive Persian online TTS. The user supplies their own Google AI Studio
+ * key in the app; no API key is bundled into the public APK or source code.
+ */
 export async function synthesizePersianOnlineAudio(
   text: string,
+  character: CharacterId,
+  tone: ToneId,
   speed = 1,
+  apiKey = '',
   callback?: (progress: SynthesisProgress) => void,
 ): Promise<NeuralAudioResult> {
-  const cleanText = normalizePersianText(text, false).trim();
+  const cleanText = text.trim();
   if (!cleanText) throw new Error('متنی برای خوانش وارد نشده است.');
-  if (cleanText.length > MAX_TEXT_CHARS) throw new Error(`برای پایداری بهتر، متن آنلاین را به بخش‌های حداکثر ${MAX_TEXT_CHARS} نویسه‌ای تقسیم کنید.`);
-  report(callback, 0, 3, 'اتصال به موتور آنلاین فارسی…');
-
-  const clampedSpeed = Math.max(0.75, Math.min(1.25, speed));
-  const key = await cacheKey(cleanText, clampedSpeed);
-  const audioCache = await caches.open(AUDIO_CACHE);
-  const cached = await audioCache.match(key);
-  if (cached) {
-    const cachedBlob = await cached.blob();
-    const cachedUrl = URL.createObjectURL(cachedBlob);
-    report(callback, 3, 3, 'فایل صوتی از حافظهٔ محلی آماده شد.');
-    return { blob: cachedBlob, audioUrl: cachedUrl, duration: await readAudioDuration(cachedUrl), mimeType: 'audio/mpeg' };
+  if (cleanText.length > MAX_TEXT_CHARS) {
+    throw new Error(`برای خوانش آنلاین، متن را به بخش‌های حداکثر ${MAX_TEXT_CHARS} نویسه‌ای تقسیم کنید.`);
   }
+  if (!apiKey.trim()) throw new Error('برای موتور آنلاین Gemini ابتدا کلید API را در برنامه ذخیره کنید.');
+
+  report(callback, 0, 3, 'اتصال امن به موتور گفتار Gemini…');
+  const speedDirection = speed < 0.9
+    ? 'Speak slowly and distinctly.'
+    : speed > 1.1
+      ? 'Speak briskly but keep every word intelligible.'
+      : 'Use a natural conversational pace.';
+  const style = `${characterDirection(character)} ${STYLE_BY_TONE[tone]} ${speedDirection} Read the supplied Persian text faithfully. Do not translate, summarize, add words, or read these instructions aloud.`;
 
   let response: Response;
   try {
-    response = await requestWithRetry(GENERATE_ENDPOINT, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: [cleanText, clampedSpeed, true, 120] }),
+    response = await fetch(GEMINI_TTS_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey.trim(),
+      },
+      body: JSON.stringify({
+        model: GEMINI_TTS_MODEL,
+        input: [{
+          type: 'user_input',
+          content: [{
+            type: 'text',
+            text: cleanText,
+            annotations: [{ type: 'speech_metadata', style }],
+          }],
+        }],
+        response_format: { type: 'audio' },
+        generation_config: {
+          speech_config: [{ voice: VOICE_BY_CHARACTER[character] }],
+        },
+      }),
+      signal: AbortSignal.timeout(90000),
     });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('زمان پاسخ موتور آنلاین تمام شد؛ حالت آفلاین فعال می‌شود.');
-    throw new Error('اتصال به موتور آنلاین برقرار نشد؛ حالت آفلاین فعال می‌شود.');
+  } catch {
+    throw new Error('اتصال به Gemini برقرار نشد. اتصال اینترنت یا دسترسی API را بررسی کنید.');
   }
-  if (!response.ok) throw new Error(`سرویس آنلاین در دسترس نیست (${response.status}).`);
 
-  const { event_id: eventId } = (await response.json()) as { event_id?: string };
-  if (!eventId) throw new Error('شناسهٔ تولید صوت آنلاین دریافت نشد.');
-  report(callback, 1, 3, 'در حال ساخت صدای طبیعی با موتور آنلاین…');
-  const result = await waitForGradioResult(eventId);
-  report(callback, 2, 3, 'دریافت و آماده‌سازی فایل صوتی…');
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    const errorObject = payload.error as { message?: unknown } | undefined;
+    const message = typeof errorObject?.message === 'string' ? errorObject.message : '';
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('کلید Gemini نامعتبر است یا اجازهٔ استفاده از مدل گفتار را ندارد.');
+    }
+    if (response.status === 429) {
+      throw new Error('سهمیهٔ Gemini فعلاً تمام شده است؛ بعداً دوباره تلاش کنید.');
+    }
+    throw new Error(message || `Gemini درخواست را نپذیرفت (${response.status}).`);
+  }
 
-  const rawBlob = await responseToBlob(result);
-  const blob = rawBlob.type === 'audio/mpeg' ? rawBlob : await (async () => {
-    const decoder = new OfflineAudioContext(1, 1, 24000);
-    const audio = await decoder.decodeAudioData(await rawBlob.arrayBuffer());
-    normalizeLoudnessInPlace(audio);
-    return await audioBufferToMp3(audio);
-  })();
-  await audioCache.put(key, new Response(blob, { headers: { 'content-type': 'audio/mpeg' } }));
+  report(callback, 1, 3, 'تولید گفتار با لحن و شخصیت انتخاب‌شده…');
+  const audioBase64 = findAudioData(payload);
+  if (!audioBase64) throw new Error('پاسخ Gemini فایل صوتی قابل‌استفاده نداشت.');
+
+  report(callback, 2, 3, 'آماده‌سازی فایل صوتی MP3…');
+  const wavBytes = decodeBase64(audioBase64);
+  const wavBlob = new Blob([wavBytes], { type: 'audio/wav' });
+  const context = new OfflineAudioContext(1, 1, 24000);
+  const decoded = await context.decodeAudioData(await wavBlob.arrayBuffer());
+  const blob = await audioBufferToMp3(decoded);
   const audioUrl = URL.createObjectURL(blob);
-  const duration = await readAudioDuration(audioUrl);
-  report(callback, 3, 3, 'فایل صوتی آنلاین آماده است.');
+  const duration = Number.isFinite(decoded.duration) ? decoded.duration : 0;
+
+  report(callback, 3, 3, 'فایل صوتی Gemini آماده است.');
   return { blob, audioUrl, duration, mimeType: 'audio/mpeg' };
 }
