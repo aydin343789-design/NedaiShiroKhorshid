@@ -199,7 +199,7 @@ export default function App() {
       } else {
         if (engineMode === 'online') {
           usedEngine = 'offline';
-          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین (کلید Gemini تنظیم نشده)`;
+          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین (کلید آنلاین تنظیم نشده)`;
           toneName = toneObj?.name || 'طبیعی';
           setGenerationMessage('کلید موتور آنلاین را از منوی سه‌خطی ذخیره کن؛ فعلاً صدای انتخابی به‌صورت آفلاین ساخته می‌شود…');
           await prepareOfflineVoicePack(setVoicePack, selectedCharacter);
