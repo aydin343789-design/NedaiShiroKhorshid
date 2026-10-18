@@ -8,7 +8,7 @@ const GENERATE_ENDPOINT = `${AVA_SPACE}/gradio_api/call/generate`;
 const REQUEST_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 3;
 const MAX_TEXT_CHARS = 1800;
-const AUDIO_CACHE = 'nedaye-shirokhorshid-tts-audio-v1';
+const AUDIO_CACHE = 'nedaye-shirokhorshid-tts-audio-v2';
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -74,45 +74,67 @@ function report(
   callback?.({ completed, total, message });
 }
 
+async function readStreamChunkWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timer: number | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = window.setTimeout(() => {
+      // Stop the pending stream read as well as reporting the timeout.
+      void reader.cancel().catch(() => undefined);
+      reject(new Error('زمان دریافت پاسخ صوتی آنلاین تمام شد.'));
+    }, REQUEST_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([reader.read(), timeout]);
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
+}
+
 async function waitForGradioResult(eventId: string): Promise<unknown> {
-  const response = await requestWithRetry(`${GENERATE_ENDPOINT}/${encodeURIComponent(eventId)}`, {
+  const response = await requestWithRetry(GENERATE_ENDPOINT + '/' + encodeURIComponent(eventId), {
     method: 'GET',
     headers: { Accept: 'text/event-stream' },
   });
-  if (!response.ok || !response.body) throw new Error(`سرویس آنلاین پاسخ مناسبی نداد (${response.status}).`);
+  if (!response.ok || !response.body) throw new Error('سرویس آنلاین پاسخ مناسبی نداد (' + response.status + ').');
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let lastEvent = '';
-  while (true) {
-    const { value, done } = await Promise.race([
-      reader.read(),
-      wait(REQUEST_TIMEOUT_MS).then(() => { throw new Error('زمان دریافت پاسخ صوتی آنلاین تمام شد.'); }),
-    ]);
-    buffer += decoder.decode(value || new Uint8Array());
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() || '';
+  try {
+    while (true) {
+      const { value, done } = await readStreamChunkWithTimeout(reader);
+      buffer += decoder.decode(value || new Uint8Array());
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      if (line.startsWith('event:')) {
-        lastEvent = line.slice(6).trim();
-        continue;
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          lastEvent = line.slice(6).trim();
+          continue;
+        }
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        let parsed: unknown;
+        try { parsed = JSON.parse(payload); } catch { continue; }
+        if (Array.isArray(parsed) && parsed[0] === null) throw new Error('سرویس آنلاین نتوانست متن را تولید کند.');
+        const serialized = JSON.stringify(parsed);
+        if (lastEvent === 'complete' && (serialized.includes('path') || serialized.includes('url') || serialized.includes('data'))) return parsed;
+        if (lastEvent === 'error') {
+          const message = parsed && typeof parsed === 'object' && 'message' in parsed ? String((parsed as { message?: unknown }).message ?? '') : '';
+          throw new Error(message || 'تولید صدای آنلاین با خطا متوقف شد.');
+        }
       }
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === '[DONE]') continue;
-      let parsed: unknown;
-      try { parsed = JSON.parse(payload); } catch { continue; }
-      if (Array.isArray(parsed) && parsed[0] === null) throw new Error('سرویس آنلاین نتوانست متن را تولید کند.');
-      const serialized = JSON.stringify(parsed);
-      if (lastEvent === 'complete' && (serialized.includes('path') || serialized.includes('url') || serialized.includes('data'))) return parsed;
-      if (lastEvent === 'error') {
-        const message = parsed && typeof parsed === 'object' && 'message' in parsed ? String((parsed as { message?: unknown }).message ?? '') : '';
-        throw new Error(message || 'تولید صدای آنلاین با خطا متوقف شد.');
-      }
+      if (done) break;
     }
-    if (done) break;
+  } finally {
+    // A timed-out read may still be settling while cancellation propagates.
+    // Do not let lock cleanup hide the original timeout/network error.
+    try { reader.releaseLock(); } catch { /* stream cancellation is still settling */ }
   }
   throw new Error('پاسخ صوتی سرویس آنلاین ناقص بود.');
 }
@@ -176,7 +198,7 @@ export async function synthesizePersianOnlineAudio(
   speed = 1,
   callback?: (progress: SynthesisProgress) => void,
 ): Promise<NeuralAudioResult> {
-  const cleanText = normalizePersianText(text).trim();
+  const cleanText = normalizePersianText(text, false).trim();
   if (!cleanText) throw new Error('متنی برای خوانش وارد نشده است.');
   if (cleanText.length > MAX_TEXT_CHARS) throw new Error(`برای پایداری بهتر، متن آنلاین را به بخش‌های حداکثر ${MAX_TEXT_CHARS} نویسه‌ای تقسیم کنید.`);
   report(callback, 0, 3, 'اتصال به موتور آنلاین فارسی…');

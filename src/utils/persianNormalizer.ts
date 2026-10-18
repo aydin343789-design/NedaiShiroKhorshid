@@ -162,7 +162,7 @@ function expandSimpleNumbers(text: string) {
 }
 
 /** پاک‌سازی و استانداردسازی متن فارسی برای خوانش طبیعی گفتار. */
-export function normalizePersianText(text: string): string {
+export function normalizePersianText(text: string, pronunciationHints = true): string {
   if (!text) return '';
 
   let output = text
@@ -179,13 +179,17 @@ export function normalizePersianText(text: string): string {
     .replace(/\s*([.…])\s*/g, '$1 ')
     .trim();
 
-  output = expandSimpleNumbers(output);
+  // Online Ava has its own Persian frontend; adding manual vowel marks and phonetic spellings
+  // can confuse it. Apply these hints only to the local Piper/eSpeak path.
+  if (pronunciationHints) {
+    output = expandSimpleNumbers(output);
 
-  // Longer phrases must be handled first so a shorter entry cannot overwrite them.
-  for (const [phrase, spoken] of Object.entries(PRONUNCIATION_MAP).sort(
-    ([left], [right]) => right.length - left.length
-  )) {
-    output = replaceWholePhrase(output, phrase, spoken);
+    // Longer phrases must be handled first so a shorter entry cannot overwrite them.
+    for (const [phrase, spoken] of Object.entries(PRONUNCIATION_MAP).sort(
+      ([left], [right]) => right.length - left.length
+    )) {
+      output = replaceWholePhrase(output, phrase, spoken);
+    }
   }
 
   return output.replace(/\s+/g, ' ').trim();
