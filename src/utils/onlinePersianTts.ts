@@ -1,3 +1,4 @@
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { audioBufferToMp3 } from './neuralPersianTts';
 import type { CharacterId, ToneId } from '../types';
 import type { NeuralAudioResult, SynthesisProgress } from './neuralPersianTts';
@@ -94,37 +95,68 @@ export async function synthesizePersianOnlineAudio(
       : 'Use a natural conversational pace.';
   const style = `${characterDirection(character)} ${STYLE_BY_TONE[tone]} ${speedDirection} Read the supplied Persian text faithfully. Do not translate, summarize, add words, or read these instructions aloud.`;
 
-  let response: Response;
+  const requestBody = {
+    model: GEMINI_TTS_MODEL,
+    input: [{
+      type: 'user_input',
+      content: [{
+        type: 'text',
+        text: cleanText,
+        annotations: [{ type: 'speech_metadata', style }],
+      }],
+    }],
+    response_format: { type: 'audio' },
+    generation_config: {
+      speech_config: [{ voice: VOICE_BY_CHARACTER[character] }],
+    },
+  };
+
+  let responseStatus = 0;
+  let payload: Record<string, unknown> = {};
   try {
-    response = await fetch(GEMINI_TTS_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey.trim(),
-      },
-      body: JSON.stringify({
-        model: GEMINI_TTS_MODEL,
-        input: [{
-          type: 'user_input',
-          content: [{
-            type: 'text',
-            text: cleanText,
-            annotations: [{ type: 'speech_metadata', style }],
-          }],
-        }],
-        response_format: { type: 'audio' },
-        generation_config: {
-          speech_config: [{ voice: VOICE_BY_CHARACTER[character] }],
+    if (Capacitor.isNativePlatform()) {
+      // Use Android's native HTTP bridge to avoid WebView CORS/preflight failures.
+      const nativeResponse = await CapacitorHttp.post({
+        url: GEMINI_TTS_ENDPOINT,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey.trim(),
         },
-      }),
-      signal: AbortSignal.timeout(90000),
-    });
-  } catch {
-    throw new Error('اتصال به Gemini برقرار نشد. اتصال اینترنت یا دسترسی API را بررسی کنید.');
+        data: requestBody,
+        connectTimeout: 20000,
+        readTimeout: 90000,
+      });
+      responseStatus = nativeResponse.status;
+      const raw = nativeResponse.data;
+      if (typeof raw === 'string') {
+        try { payload = JSON.parse(raw) as Record<string, unknown>; }
+        catch { payload = { message: raw }; }
+      } else if (raw && typeof raw === 'object') {
+        payload = raw as Record<string, unknown>;
+      }
+    } else {
+      const response = await fetch(GEMINI_TTS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey.trim(),
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(90000),
+      });
+      responseStatus = response.status;
+      payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : '';
+    throw new Error(
+      detail
+        ? `اتصال آنلاین برقرار نشد: ${detail.slice(0, 120)}`
+        : 'اتصال آنلاین برقرار نشد؛ اینترنت، دسترسی API و محدودیت شبکه را بررسی کنید.',
+    );
   }
 
-  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok) {
+  if (responseStatus < 200 || responseStatus >= 300) {
     const errorObject = payload.error as { message?: unknown } | undefined;
     const message = typeof errorObject?.message === 'string' ? errorObject.message : '';
     if (response.status === 401 || response.status === 403) {
@@ -133,7 +165,7 @@ export async function synthesizePersianOnlineAudio(
     if (response.status === 429) {
       throw new Error('سهمیهٔ Gemini فعلاً تمام شده است؛ بعداً دوباره تلاش کنید.');
     }
-    throw new Error(message || `Gemini درخواست را نپذیرفت (${response.status}).`);
+    throw new Error(message || `Gemini درخواست را نپذیرفت (${responseStatus}).`);
   }
 
   report(callback, 1, 3, 'تولید گفتار با لحن و شخصیت انتخاب‌شده…');
