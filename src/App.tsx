@@ -159,7 +159,7 @@ export default function App() {
       const toneObj = TONES.find((t) => t.id === selectedTone);
       let usedEngine: 'online' | 'offline' = engineMode;
       let characterName = engineMode === 'online'
-        ? `Gemini TTS · ${charObj?.name || 'گوینده'}`
+        ? `موتور آنلاین · ${charObj?.name || 'گوینده'}`
         : `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
       let toneName = toneObj?.name || 'طبیعی';
 
@@ -201,7 +201,7 @@ export default function App() {
           usedEngine = 'offline';
           characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین (کلید Gemini تنظیم نشده)`;
           toneName = toneObj?.name || 'طبیعی';
-          setGenerationMessage('برای استفاده از Gemini کلید API را ذخیره کن؛ فعلاً صدای انتخابی به‌صورت آفلاین ساخته می‌شود…');
+          setGenerationMessage('کلید موتور آنلاین را از منوی سه‌خطی ذخیره کن؛ فعلاً صدای انتخابی به‌صورت آفلاین ساخته می‌شود…');
           await prepareOfflineVoicePack(setVoicePack, selectedCharacter);
         }
         synth = await synthesizePersianNeuralAudio(
