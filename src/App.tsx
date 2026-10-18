@@ -322,7 +322,7 @@ export default function App() {
 
   // Screen 1: Create Audio Screen (Strict single-page, no scroll)
   return (
-    <div className="flex h-screen max-h-screen w-full flex-col justify-between overflow-hidden bg-[#06090e] text-slate-100 p-3 sm:p-4 select-none font-sans">
+    <div className="flex min-h-screen w-full flex-col justify-start overflow-y-auto bg-[#06090e] text-slate-100 p-3 sm:p-4 select-none font-sans">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-amber-500/40 bg-slate-900/95 px-4 py-2 text-xs font-medium text-amber-200 shadow-xl backdrop-blur-md">
@@ -354,7 +354,43 @@ export default function App() {
         </button>
       </header>
 
-      {/* Main Workspace (Strictly fitted, no scroll) */}
+      {/* Offline model download status and progress must remain visible. */}
+      <section
+        className={`mx-auto mt-2 flex w-full max-w-xl items-center justify-between gap-3 rounded-xl border px-3 py-2 text-[11px] sm:text-xs ${
+          voicePack.stage === 'ready'
+            ? 'border-emerald-500/25 bg-emerald-500/5 text-emerald-200'
+            : voicePack.stage === 'error'
+              ? 'border-rose-500/35 bg-rose-500/10 text-rose-100'
+              : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+        }`}
+        role="status"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="leading-relaxed">
+            {engineMode === 'online' ? 'موتور آنلاین انتخاب شده است.' : voicePack.message}
+            {engineMode === 'offline' && voicePack.stage === 'downloading' && voicePack.total > 0
+              ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
+              : ''}
+          </div>
+          {engineMode === 'offline' && voicePack.stage === 'downloading' && (
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-full rounded-full bg-emerald-400 transition-all"
+                style={{ width: (Math.min(100, Math.round((voicePack.completed / Math.max(voicePack.total, 1)) * 100)) + '%') }}
+              />
+            </div>
+          )}
+        </div>
+        {engineMode === 'offline' && voicePack.stage === 'error' ? (
+          <button type="button" onClick={prepareVoicePack} className="shrink-0 rounded-lg border border-rose-300/50 px-2 py-1 font-bold text-rose-100">
+            تلاش دوباره
+          </button>
+        ) : engineMode === 'offline' && voicePack.stage === 'ready' ? (
+          <span className="shrink-0 font-bold text-emerald-300">آماده</span>
+        ) : null}
+      </section>
+
+      {/* Main Workspace */}
       <main className="flex flex-1 flex-col justify-between py-2 max-w-xl mx-auto w-full gap-2.5">
         {/* 1. Character Selection with Real Avatars */}
         <div className="space-y-1.5">
