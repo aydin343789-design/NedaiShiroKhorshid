@@ -180,6 +180,8 @@ export default function App() {
           );
         } catch (onlineError) {
           console.warn('Online TTS failed; falling back to offline engine.', onlineError);
+          const reason = onlineError instanceof Error ? onlineError.message : 'خطای نامشخص';
+          showToast(`خطای آنلاین: ${reason.slice(0, 85)}؛ خروجی آفلاین ساخته شد.`);
           usedEngine = 'offline';
           characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · پشتیبان آفلاین`;
           toneName = toneObj?.name || 'طبیعی';
@@ -439,11 +441,6 @@ export default function App() {
               );
             })}
           </div>
-          {engineMode === 'online' && (
-            <p className="px-0.5 text-[10px] leading-relaxed text-cyan-200/80">
-              موتور Gemini با کلید API از لحن‌های انتخابی و شخصیت‌های زن، مرد، کودکانه و راوی پشتیبانی می‌کند. بدون کلید ذخیره‌شده، برنامه خودکار از موتور آفلاین استفاده می‌کند.
-            </p>
-          )}
         </div>
 
         {/* 3. Text Box with 1 default sample */}
@@ -518,13 +515,8 @@ export default function App() {
 
         </div>
 
-        <div className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
-          <span>
-            `گوینده: ${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · لحن: ${TONES.find((item) => item.id === selectedTone)?.name}`
-          </span>
-          <span className={`shrink-0 ${engineMode === 'online' ? 'text-cyan-300' : 'text-emerald-400'}`}>
-            {engineMode === 'online' ? (geminiApiKey ? 'آنلاین' : 'کلید لازم است') : voicePack.stage === 'ready' ? 'آفلاین آماده' : 'در حال آماده‌سازی'}
-          </span>
+        <div className="rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
+          گوینده: {CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · لحن: {TONES.find((item) => item.id === selectedTone)?.name}
         </div>
         <button
           type="button"
