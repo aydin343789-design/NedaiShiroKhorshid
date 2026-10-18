@@ -192,7 +192,7 @@ export const AudioPlayerScreen: React.FC<AudioPlayerScreenProps> = ({
       </div>
 
       {/* Main Content (Center) */}
-      <div className="flex flex-1 flex-col justify-center max-w-xl mx-auto w-full py-2 gap-3.5">
+      <div className="flex min-h-0 flex-1 flex-col justify-start overflow-y-auto max-w-xl mx-auto w-full py-2 gap-3">
         {/* Character Avatar & File Info Card */}
         {(() => {
           const charObj = CHARACTERS.find((c) => c.id === clip.character);
@@ -222,7 +222,6 @@ export const AudioPlayerScreen: React.FC<AudioPlayerScreenProps> = ({
                   {clip.text}
                 </p>
               </div>
-              <LionSunEmblem size="sm" className="hidden sm:inline-flex" />
             </div>
           );
         })()}
