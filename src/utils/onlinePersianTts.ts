@@ -142,7 +142,9 @@ export async function synthesizePersianOnlineAudio(
 
   report(callback, 2, 3, 'آماده‌سازی فایل صوتی MP3…');
   const wavBytes = decodeBase64(audioBase64);
-  const wavBlob = new Blob([wavBytes], { type: 'audio/wav' });
+  const wavCopy = new Uint8Array(wavBytes.byteLength);
+  wavCopy.set(wavBytes);
+  const wavBlob = new Blob([wavCopy.buffer], { type: 'audio/wav' });
   const context = new OfflineAudioContext(1, 1, 24000);
   const decoded = await context.decodeAudioData(await wavBlob.arrayBuffer());
   const blob = await audioBufferToMp3(decoded);
