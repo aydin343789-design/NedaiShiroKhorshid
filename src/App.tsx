@@ -22,7 +22,6 @@ import {
   synthesizePersianNeuralAudio,
   type VoicePackProgress,
 } from './utils/neuralPersianTts';
-import { normalizePersianText } from './utils/persianNormalizer';
 import { synthesizePersianOnlineAudio } from './utils/onlinePersianTts';
 
 const STORAGE_KEY = 'nedaye_shirokhorshid_history_v4';
@@ -125,10 +124,12 @@ export default function App() {
         : `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
       let toneName = engineMode === 'online' ? 'پیش‌فرض موتور آنلاین' : (toneObj?.name || 'طبیعی');
 
-      // Normalized text according to Persian rules
-      const cleanText = normalizePersianText(text.trim());
+      // Keep the user's original wording. Each engine applies its own text frontend;
+      // Ava must not receive Piper's manual pronunciation spellings.
+      const cleanText = text.trim();
+      const canUseOnlineVoice = engineMode === 'online' && selectedCharacter === 'female';
       let synth;
-      if (engineMode === 'online') {
+      if (canUseOnlineVoice) {
         try {
           synth = await synthesizePersianOnlineAudio(cleanText, speed, (progress) => setGenerationMessage(progress.message));
         } catch (onlineError) {
@@ -137,6 +138,7 @@ export default function App() {
           characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · پشتیبان آفلاین`;
           toneName = toneObj?.name || 'طبیعی';
           setGenerationMessage('موتور آنلاین پاسخ نداد؛ در حال استفاده از موتور آفلاین…');
+          await prepareOfflineVoicePack(setVoicePack, selectedCharacter);
           synth = await synthesizePersianNeuralAudio(
             cleanText,
             selectedCharacter,
@@ -147,6 +149,13 @@ export default function App() {
           );
         }
       } else {
+        if (engineMode === 'online') {
+          usedEngine = 'offline';
+          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین برای حفظ جنس صدا`;
+          toneName = toneObj?.name || 'طبیعی';
+          setGenerationMessage('موتور آنلاین فقط یک صدای ثابت دارد؛ در حال آماده‌سازی صدای انتخاب‌شده به‌صورت آفلاین…');
+          await prepareOfflineVoicePack(setVoicePack, selectedCharacter);
+        }
         synth = await synthesizePersianNeuralAudio(
           cleanText,
           selectedCharacter,
@@ -410,7 +419,7 @@ export default function App() {
           </div>
           {engineMode === 'online' && (
             <p className="px-0.5 text-[10px] leading-relaxed text-cyan-200/80">
-              در حالت آنلاین، موتور آوا از صدای پیش‌فرض خودش استفاده می‌کند؛ انتخاب گوینده و لحن فقط در حالت آفلاین اعمال می‌شود.
+              موتور آنلاین آوا فقط یک صدای ثابت دارد؛ برای حفظ انتخاب صدای مردانه، کودکانه یا راوی، برنامه به‌صورت خودکار از موتور آفلاین استفاده می‌کند.
             </p>
           )}
         </div>
