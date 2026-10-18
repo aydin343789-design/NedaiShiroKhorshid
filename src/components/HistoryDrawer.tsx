@@ -84,7 +84,7 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
             </div>
             <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs text-cyan-300 underline">دریافت کلید API</a>
             <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-              کلید فقط روی همین دستگاه ذخیره می‌شود. اگر اتصال برقرار نشد، پیام خطای دقیق را بررسی کنید.
+              
             </p>
           </div>
         ) : (
