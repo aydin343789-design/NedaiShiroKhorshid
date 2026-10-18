@@ -11,6 +11,7 @@ import {
   Newspaper,
   Briefcase,
   Flame,
+  Radio,
 } from 'lucide-react';
 import { LionSunEmblem } from './components/LionSunEmblem';
 import { HistoryDrawer } from './components/HistoryDrawer';
@@ -25,6 +26,7 @@ import {
 import { synthesizePersianOnlineAudio } from './utils/onlinePersianTts';
 
 const STORAGE_KEY = 'nedaye_shirokhorshid_history_v4';
+const GEMINI_KEY_STORAGE = 'nedaye_gemini_api_key_v1';
 
 const TONE_ICONS: Record<ToneId, React.ReactNode> = {
   cheerful: <Smile className="h-3.5 w-3.5" />,
@@ -32,6 +34,7 @@ const TONE_ICONS: Record<ToneId, React.ReactNode> = {
   sad: <CloudRain className="h-3.5 w-3.5" />,
   formal: <Newspaper className="h-3.5 w-3.5" />,
   professional: <Briefcase className="h-3.5 w-3.5" />,
+  newscast: <Radio className="h-3.5 w-3.5" />,
   epic: <Flame className="h-3.5 w-3.5" />,
 };
 
@@ -39,6 +42,12 @@ export default function App() {
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterId>('female');
   const [selectedTone, setSelectedTone] = useState<ToneId>('cheerful');
   const [engineMode, setEngineMode] = useState<'offline' | 'online'>('online');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
+    try { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; } catch { return ''; }
+  });
+  const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState<string>(() => {
+    try { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; } catch { return ''; }
+  });
   const [text, setText] = useState<string>(DEFAULT_SAMPLE_TEXT);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [activeClip, setActiveClip] = useState<SavedAudioClip | null>(null);
@@ -120,18 +129,25 @@ export default function App() {
       const toneObj = TONES.find((t) => t.id === selectedTone);
       let usedEngine: 'online' | 'offline' = engineMode;
       let characterName = engineMode === 'online'
-        ? 'آوا آنلاین (فارسی)'
+        ? `Gemini TTS · ${charObj?.name || 'گوینده'}`
         : `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
-      let toneName = engineMode === 'online' ? 'پیش‌فرض موتور آنلاین' : (toneObj?.name || 'طبیعی');
+      let toneName = toneObj?.name || 'طبیعی';
 
       // Keep the user's original wording. Each engine applies its own text frontend;
       // Ava must not receive Piper's manual pronunciation spellings.
       const cleanText = text.trim();
-      const canUseOnlineVoice = engineMode === 'online' && selectedCharacter === 'female' && selectedTone === 'cheerful';
+      const canUseOnlineVoice = engineMode === 'online' && Boolean(geminiApiKey.trim());
       let synth;
       if (canUseOnlineVoice) {
         try {
-          synth = await synthesizePersianOnlineAudio(cleanText, speed, (progress) => setGenerationMessage(progress.message));
+          synth = await synthesizePersianOnlineAudio(
+            cleanText,
+            selectedCharacter,
+            selectedTone,
+            speed,
+            geminiApiKey,
+            (progress) => setGenerationMessage(progress.message),
+          );
         } catch (onlineError) {
           console.warn('Online TTS failed; falling back to offline engine.', onlineError);
           usedEngine = 'offline';
@@ -151,9 +167,9 @@ export default function App() {
       } else {
         if (engineMode === 'online') {
           usedEngine = 'offline';
-          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین برای حفظ جنس صدا`;
+          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین (کلید Gemini تنظیم نشده)`;
           toneName = toneObj?.name || 'طبیعی';
-          setGenerationMessage('موتور آنلاین فقط یک صدای ثابت دارد؛ در حال آماده‌سازی صدای انتخاب‌شده به‌صورت آفلاین…');
+          setGenerationMessage('برای استفاده از Gemini کلید API را ذخیره کن؛ فعلاً صدای انتخابی به‌صورت آفلاین ساخته می‌شود…');
           await prepareOfflineVoicePack(setVoicePack, selectedCharacter);
         }
         synth = await synthesizePersianNeuralAudio(
@@ -312,7 +328,7 @@ export default function App() {
         role="status"
       >
         <span className="leading-relaxed">
-          {engineMode === 'online' ? 'حالت آنلاین آماده است؛ متن برای تولید صدا به موتور رایگان آوا ارسال می‌شود.' : voicePack.message}
+          {engineMode === 'online' ? (geminiApiKey ? 'Gemini آماده است؛ صدای انتخابی و لحن انتخابی به موتور آنلاین ارسال می‌شود.' : 'برای موتور آنلاین Gemini کلید API لازم است؛ بدون کلید از موتور آفلاین استفاده می‌شود.') : voicePack.message}
           {voicePack.stage === 'downloading' && voicePack.total > 0
             ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
             : ''}
@@ -419,7 +435,7 @@ export default function App() {
           </div>
           {engineMode === 'online' && (
             <p className="px-0.5 text-[10px] leading-relaxed text-cyan-200/80">
-              موتور آنلاین آوا فقط یک صدای ثابت دارد و لحن انتخابی را هم اعمال نمی‌کند؛ برای اجرای صدای گوینده یا لحن انتخابی، برنامه به‌صورت خودکار از موتور آفلاین استفاده می‌کند.
+              موتور Gemini با کلید API از لحن‌های انتخابی و شخصیت‌های زن، مرد، کودکانه و راوی پشتیبانی می‌کند. بدون کلید ذخیره‌شده، برنامه خودکار از موتور آفلاین استفاده می‌کند.
             </p>
           )}
         </div>
@@ -467,7 +483,7 @@ export default function App() {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs px-0.5">
             <span className="font-semibold text-slate-200">موتور تولید صدا:</span>
-            <span className="text-[10px] text-slate-500">بدون API پولی</span>
+            <span className="text-[10px] text-slate-500">سهمیهٔ رایگان ممکن است؛ محدودیت و هزینه را بررسی کن</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -476,10 +492,10 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'online' ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">آنلاین · آوا</span>
+                <span className="font-bold text-xs">آنلاین · Gemini TTS</span>
                 {engineMode === 'online' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">کیفیت بالاتر · اینترنت لازم</p>
+              <p className="mt-0.5 text-[9px] opacity-70">لحن‌های قابل‌کنترل · کلید API لازم</p>
             </button>
             <button
               type="button"
@@ -493,14 +509,49 @@ export default function App() {
               <p className="mt-0.5 text-[9px] opacity-70">خصوصی · بدون اینترنت</p>
             </button>
           </div>
+          {engineMode === 'online' && (
+            <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-2 space-y-1.5">
+              <div className="flex gap-1.5">
+                <input
+                  type="password"
+                  dir="ltr"
+                  autoComplete="off"
+                  value={geminiApiKeyDraft}
+                  onChange={(event) => setGeminiApiKeyDraft(event.target.value)}
+                  placeholder="Gemini API key (AIza…)"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-[11px] text-slate-100 outline-none focus:border-cyan-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextKey = geminiApiKeyDraft.trim();
+                    try {
+                      if (nextKey) localStorage.setItem(GEMINI_KEY_STORAGE, nextKey);
+                      else localStorage.removeItem(GEMINI_KEY_STORAGE);
+                      setGeminiApiKey(nextKey);
+                      setGeminiApiKeyDraft(nextKey);
+                      showToast(nextKey ? 'کلید Gemini فقط روی همین دستگاه ذخیره شد.' : 'کلید Gemini از این دستگاه پاک شد.');
+                    } catch {
+                      showToast('ذخیرهٔ کلید در این دستگاه ممکن نشد.');
+                    }
+                  }}
+                  className="shrink-0 rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-[10px] font-bold text-cyan-100"
+                >ذخیره</button>
+              </div>
+              <p className="text-[9px] leading-relaxed text-slate-400">
+                <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer" className="text-cyan-300 underline">دریافت کلید از Google AI Studio</a>
+                {' · '}کلید در همین دستگاه می‌ماند و داخل APK قرار نمی‌گیرد. سهمیهٔ رایگان تضمین‌شده نیست؛ مصرف ممکن است هزینه داشته باشد.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
           <span>
-            {engineMode === 'online' ? 'آوا آنلاین · یک صدای فارسی طبیعی' : `${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · ${TONES.find((item) => item.id === selectedTone)?.description}`}
+            {engineMode === 'online' ? `Gemini TTS · ${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · ${TONES.find((item) => item.id === selectedTone)?.name}` : `${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · ${TONES.find((item) => item.id === selectedTone)?.description}`}
           </span>
           <span className={`shrink-0 ${engineMode === 'online' ? 'text-cyan-300' : 'text-emerald-400'}`}>
-            {engineMode === 'online' ? 'رایگان آنلاین' : voicePack.stage === 'ready' ? 'کاملاً آفلاین' : 'نیازمند آماده‌سازی'}
+            {engineMode === 'online' ? (geminiApiKey ? 'کلید ذخیره شده' : 'کلید لازم است') : voicePack.stage === 'ready' ? 'کاملاً آفلاین' : 'نیازمند آماده‌سازی'}
           </span>
         </div>
         <button
