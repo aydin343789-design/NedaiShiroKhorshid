@@ -12,7 +12,7 @@ export interface CharacterItem {
 }
 
 export interface ToneItem {
-  id: 'cheerful' | 'intimate' | 'sad' | 'formal' | 'professional' | 'epic';
+  id: 'cheerful' | 'intimate' | 'sad' | 'formal' | 'professional' | 'newscast' | 'epic';
   name: string;
   iconName: string;
   description: string;
@@ -55,6 +55,7 @@ export const TONES: ToneItem[] = [
   { id: 'sad', name: 'غمگین', iconName: 'cloud-rain', description: 'آرام، سنگین و احساسی' },
   { id: 'formal', name: 'رسمی', iconName: 'newspaper', description: 'منظم، شمرده و اداری' },
   { id: 'professional', name: 'حرفه‌ای', iconName: 'briefcase', description: 'شفاف، مطمئن و ارائه‌ای' },
+  { id: 'newscast', name: 'خبری', iconName: 'radio', description: 'شمرده، بی‌طرف، واضح و مناسب گویندگی خبر' },
   { id: 'epic', name: 'حماسی', iconName: 'sparkles', description: 'باشکوه، عمیق و قدرتمند' },
 ];
 
