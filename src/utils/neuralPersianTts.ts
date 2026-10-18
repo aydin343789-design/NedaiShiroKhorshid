@@ -197,6 +197,17 @@ const TONE_PROFILES: Record<ToneId, ToneProfile> = {
     pauseMs: 280,
     breathMs: 90,
   },
+  newscast: {
+    inferenceRate: 0.86,
+    noiseScale: 0.72,
+    noiseWidth: 0.72,
+    semitones: -0.1,
+    lowShelfDb: 0.25,
+    highShelfDb: 0.8,
+    reverbMix: 0,
+    pauseMs: 330,
+    breathMs: 45,
+  },
   epic: {
     inferenceRate: 0.64,
     noiseScale: 0.84,
@@ -501,6 +512,13 @@ function prepareProsodyText(text: string, toneId: ToneId): string {
       return withBreaths.replace(/[!…]+/gu, '،').replace(/،\s*$/u, '') + '۔';
     case 'professional':
       return withBreaths.replace(/[!…]+/gu, '،').replace(/،\s*$/u, '') + '۔';
+    case 'newscast':
+      return withBreaths
+        .replace(/[!…]+/gu, '،')
+        .replace(/،\s*$/u, '')
+        .replace(/\s*([،؛])\s*/gu, '$1 ')
+        .replace(/\s*([.!؟۔])\s*/gu, '$1 ')
+        .trim() + '۔';
     case 'epic':
       return withBreaths.replace(/[.!؟]+$/u, '') + '!';
     default:
