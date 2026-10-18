@@ -8,7 +8,7 @@ const GENERATE_ENDPOINT = `${AVA_SPACE}/gradio_api/call/generate`;
 const REQUEST_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 3;
 const MAX_TEXT_CHARS = 1800;
-const AUDIO_CACHE = 'nedaye-shirokhorshid-tts-audio-v1';
+const AUDIO_CACHE = 'nedaye-shirokhorshid-tts-audio-v2';
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -198,7 +198,7 @@ export async function synthesizePersianOnlineAudio(
   speed = 1,
   callback?: (progress: SynthesisProgress) => void,
 ): Promise<NeuralAudioResult> {
-  const cleanText = normalizePersianText(text).trim();
+  const cleanText = normalizePersianText(text, false).trim();
   if (!cleanText) throw new Error('متنی برای خوانش وارد نشده است.');
   if (cleanText.length > MAX_TEXT_CHARS) throw new Error(`برای پایداری بهتر، متن آنلاین را به بخش‌های حداکثر ${MAX_TEXT_CHARS} نویسه‌ای تقسیم کنید.`);
   report(callback, 0, 3, 'اتصال به موتور آنلاین فارسی…');
