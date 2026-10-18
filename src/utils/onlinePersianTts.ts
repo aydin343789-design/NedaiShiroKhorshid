@@ -160,7 +160,8 @@ export async function synthesizePersianOnlineAudio(
     const errorObject = payload.error as { message?: unknown } | undefined;
     const message = typeof errorObject?.message === 'string' ? errorObject.message : '';
     if (responseStatus === 401 || responseStatus === 403) {
-      throw new Error('کلید Gemini نامعتبر است یا اجازهٔ استفاده از مدل گفتار را ندارد.');
+      const detail = message ? ` — ${message.slice(0, 180)}` : '';
+      throw new Error(`خطای دسترسی Gemini (${responseStatus})${detail}`);
     }
     if (responseStatus === 429) {
       throw new Error('سهمیهٔ Gemini فعلاً تمام شده است؛ بعداً دوباره تلاش کنید.');
