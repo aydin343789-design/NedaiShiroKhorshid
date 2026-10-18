@@ -1,5 +1,5 @@
 export type CharacterId = 'male' | 'female' | 'child' | 'narrator';
-export type ToneId = 'cheerful' | 'intimate' | 'sad' | 'formal' | 'professional' | 'epic';
+export type ToneId = 'cheerful' | 'intimate' | 'sad' | 'formal' | 'professional' | 'newscast' | 'epic';
 
 export interface SavedAudioClip {
   id: string;
