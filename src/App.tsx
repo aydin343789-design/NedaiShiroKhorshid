@@ -540,7 +540,7 @@ export default function App() {
               </div>
               <p className="text-[9px] leading-relaxed text-slate-400">
                 <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer" className="text-cyan-300 underline">دریافت کلید از Google AI Studio</a>
-                {' · '}کلید در همین دستگاه می‌ماند و داخل APK قرار نمی‌گیرد. سهمیهٔ رایگان تضمین‌شده نیست؛ مصرف ممکن است هزینه داشته باشد.
+                {' · '}کلید در همین دستگاه می‌ماند و داخل APK قرار نمی‌گیرد. سهمیهٔ رایگان تضمین‌شده نیست؛ مصرف ممکن است هزینه داشته باشد. در طرح رایگان، متن ارسالی ممکن است برای بهبود سرویس استفاده شود؛ متن حساس نفرست.
               </p>
             </div>
           )}
