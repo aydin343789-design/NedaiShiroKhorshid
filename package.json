@@ -1,7 +1,7 @@
 {
   "name": "nedaye-shirokhorshid",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.4.0-moss-test",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -19,6 +19,7 @@
     "@capacitor/android": "^7.6.9",
     "@capacitor/core": "^7.6.9",
     "@google/genai": "^2.4.0",
+    "@sctg/sentencepiece-js": "^1.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "dotenv": "^17.2.3",

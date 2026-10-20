@@ -18,15 +18,11 @@ import { HistoryDrawer } from './components/HistoryDrawer';
 import { AudioPlayerScreen } from './components/AudioPlayerScreen';
 import { CharacterId, ToneId, SavedAudioClip } from './types';
 import { CHARACTERS, TONES, DEFAULT_SAMPLE_TEXT } from './data/voices';
-import {
-  prepareOfflineVoicePack,
-  synthesizePersianNeuralAudio,
-  type VoicePackProgress,
-} from './utils/neuralPersianTts';
+import { type VoicePackProgress } from './utils/neuralPersianTts';
+import { prepareMossOfflineVoicePack, synthesizeMossOfflineAudio } from './utils/mossOfflineTts';
 import { synthesizePersianOnlineAudio } from './utils/onlinePersianTts';
 
 const STORAGE_KEY = 'nedaye_shirokhorshid_history_v4';
-const GEMINI_KEY_STORAGE = 'nedaye_gemini_api_key_v1';
 
 const TONE_ICONS: Record<ToneId, React.ReactNode> = {
   cheerful: <Smile className="h-3.5 w-3.5" />,
@@ -42,13 +38,6 @@ export default function App() {
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterId>('female');
   const [selectedTone, setSelectedTone] = useState<ToneId>('cheerful');
   const [engineMode, setEngineMode] = useState<'offline' | 'online'>('online');
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    try { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; } catch { return ''; }
-  });
-  const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState<string>(() => {
-    try { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; } catch { return ''; }
-  });
-  const [isTestingApiKey, setIsTestingApiKey] = useState(false);
   const [text, setText] = useState<string>(DEFAULT_SAMPLE_TEXT);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [activeClip, setActiveClip] = useState<SavedAudioClip | null>(null);
@@ -60,7 +49,7 @@ export default function App() {
     stage: 'idle',
     completed: 0,
     total: 1,
-    message: 'صدای آفلاین فقط هنگام انتخاب حالت آفلاین آماده می‌شود.',
+    message: 'MOSS آفلاین به دانلود اولیهٔ حدود ۷۶۳ مگابایت نیاز دارد.',
   });
   const [generationMessage, setGenerationMessage] = useState('');
 
@@ -86,8 +75,8 @@ export default function App() {
       total: 1,
       message: 'بررسی بستهٔ صدای آفلاین انتخاب‌شده…',
     });
-    void prepareOfflineVoicePack(setVoicePack, selectedCharacter).catch((error) => {
-      console.error('Offline neural voice preparation failed:', error);
+    void prepareMossOfflineVoicePack(setVoicePack).catch((error) => {
+      console.error('MOSS offline preparation failed:', error);
     });
   };
 
@@ -110,116 +99,40 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 4500);
   };
 
-  const saveApiKey = () => {
-    const nextKey = geminiApiKeyDraft.trim();
-    try {
-      if (nextKey) localStorage.setItem(GEMINI_KEY_STORAGE, nextKey);
-      else localStorage.removeItem(GEMINI_KEY_STORAGE);
-      setGeminiApiKey(nextKey);
-      setGeminiApiKeyDraft(nextKey);
-      showToast(nextKey ? 'کلید آنلاین ذخیره شد.' : 'کلید آنلاین پاک شد.');
-    } catch {
-      showToast('ذخیرهٔ کلید در این دستگاه ممکن نشد.');
-    }
-  };
-
-  const testApiKey = async () => {
-    const key = geminiApiKey.trim();
-    if (!key) { showToast('ابتدا کلید را ذخیره کنید.'); return; }
-    setIsTestingApiKey(true);
-    try {
-      const result = await synthesizePersianOnlineAudio('سلام، این یک آزمایش کوتاه صدای آنلاین است.', 'female', 'cheerful', 1, key);
-      URL.revokeObjectURL(result.audioUrl);
-      showToast('اتصال آنلاین موفق بود.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'خطای ناشناخته';
-      showToast(message.length > 100 ? message.slice(0, 97) + '…' : message);
-    } finally {
-      setIsTestingApiKey(false);
-    }
-  };
-
-  // Generate Audio via High-Quality Persian Neural & MP3 Engine
+  // MOSS paths are intentionally tested independently; no silent engine fallback.
   const handleGenerateAudio = async (speed: number = 1.0, pitch: number = 1.0) => {
     if (!text.trim()) {
       showToast('لطفاً متنی را وارد کنید.');
       return;
     }
-
     if (engineMode === 'offline' && voicePack.stage !== 'ready') {
-      showToast(voicePack.error || 'صدای آفلاین هنوز آماده نشده است.');
+      showToast(voicePack.error || 'ابتدا مدل MOSS آفلاین را دانلود کنید.');
       return;
     }
-
     try {
       setIsGenerating(true);
-      setGenerationMessage(engineMode === 'online' ? 'در حال اتصال به موتور آنلاین…' : 'در حال آماده‌سازی موتور آفلاین…');
-
+      setGenerationMessage(engineMode === 'online' ? 'در حال اتصال به MOSS Space…' : 'در حال اجرای MOSS روی گوشی…');
+      const cleanText = text.trim();
       const charObj = CHARACTERS.find((c) => c.id === selectedCharacter);
       const toneObj = TONES.find((t) => t.id === selectedTone);
-      let usedEngine: 'online' | 'offline' = engineMode;
-      let characterName = engineMode === 'online'
-        ? `موتور آنلاین · ${charObj?.name || 'گوینده'}`
-        : `${charObj?.name || 'گوینده'} (${charObj?.role || ''})`;
-      let toneName = toneObj?.name || 'طبیعی';
-
-      // Keep the user's original wording. Each engine applies its own text frontend;
-      // Ava must not receive Piper's manual pronunciation spellings.
-      const cleanText = text.trim();
-      const canUseOnlineVoice = engineMode === 'online' && Boolean(geminiApiKey.trim());
-      let synth;
-      if (canUseOnlineVoice) {
-        try {
-          synth = await synthesizePersianOnlineAudio(
+      const synth = engineMode === 'online'
+        ? await synthesizePersianOnlineAudio(
             cleanText,
             selectedCharacter,
             selectedTone,
             speed,
-            geminiApiKey,
             (progress) => setGenerationMessage(progress.message),
-          );
-        } catch (onlineError) {
-          console.warn('Online TTS failed; falling back to offline engine.', onlineError);
-          const reason = onlineError instanceof Error ? onlineError.message : 'خطای نامشخص';
-          showToast(`خطای آنلاین: ${reason.slice(0, 85)}؛ خروجی آفلاین ساخته شد.`);
-          usedEngine = 'offline';
-          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · پشتیبان آفلاین`;
-          toneName = toneObj?.name || 'طبیعی';
-          setGenerationMessage('موتور آنلاین پاسخ نداد؛ در حال استفاده از موتور آفلاین…');
-          await prepareOfflineVoicePack(setVoicePack, selectedCharacter);
-          synth = await synthesizePersianNeuralAudio(
-            cleanText,
-            selectedCharacter,
-            selectedTone,
-            speed,
-            pitch,
-            (progress) => setGenerationMessage(progress.message)
-          );
-        }
-      } else {
-        if (engineMode === 'online') {
-          usedEngine = 'offline';
-          characterName = `${charObj?.name || 'گوینده'} (${charObj?.role || ''}) · آفلاین (کلید آنلاین تنظیم نشده)`;
-          toneName = toneObj?.name || 'طبیعی';
-          setGenerationMessage('کلید موتور آنلاین را از منوی سه‌خطی ذخیره کن؛ فعلاً صدای انتخابی به‌صورت آفلاین ساخته می‌شود…');
-          await prepareOfflineVoicePack(setVoicePack, selectedCharacter);
-        }
-        synth = await synthesizePersianNeuralAudio(
-          cleanText,
-          selectedCharacter,
-          selectedTone,
-          speed,
-          pitch,
-          (progress) => setGenerationMessage(progress.message)
-        );
-      }
-
+          )
+        : await synthesizeMossOfflineAudio(cleanText, selectedCharacter, (progress) => setGenerationMessage(progress.message));
+      const usedEngine: 'online' | 'offline' = engineMode;
+      const characterName = engineMode === 'online'
+        ? 'MOSS آنلاین · صدای مرجع فارسی'
+        : `MOSS آفلاین · ${charObj?.name || 'گوینده'} (صدای چندزبانهٔ آزمایشی)`;
+      const toneName = engineMode === 'online'
+        ? 'لحن ثابت نمونهٔ فارسی'
+        : `لحن ثابت مدل · انتخاب «${toneObj?.name || 'طبیعی'}» در MOSS اعمال نمی‌شود`;
       const now = new Date();
-      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now
-        .getMinutes()
-        .toString()
-        .padStart(2, '0')}`;
-
+      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
       const newClip: SavedAudioClip = {
         id: `clip-${Date.now()}`,
         text: text.trim(),
@@ -233,16 +146,14 @@ export default function App() {
         speed,
         pitch,
       };
-
       const updated = [newClip, ...history.slice(0, 19)];
       saveHistory(updated);
       setActiveClip(newClip);
-
-      // Transition to Player Screen
       setCurrentScreen('player');
-    } catch (err: any) {
-      console.error('Audio synthesis failed:', err);
-      showToast(engineMode === 'online' ? 'موتورهای آنلاین و آفلاین در دسترس نبودند.' : 'خطا در تولید فایل صوتی.');
+    } catch (err) {
+      console.error('MOSS synthesis failed:', err);
+      const reason = err instanceof Error ? err.message : 'خطای ناشناخته';
+      showToast(reason.length > 130 ? `${reason.slice(0, 127)}…` : reason);
     } finally {
       setIsGenerating(false);
       setGenerationMessage('');
@@ -309,12 +220,6 @@ export default function App() {
           onDownloadClip={handleDownload}
           onDeleteClip={handleDeleteClip}
           onClearHistory={handleClearHistory}
-          apiKey={geminiApiKey}
-          apiKeyDraft={geminiApiKeyDraft}
-          onApiKeyDraftChange={setGeminiApiKeyDraft}
-          onSaveApiKey={saveApiKey}
-          onTestApiKey={testApiKey}
-          isTestingApiKey={isTestingApiKey}
         />
       </>
     );
@@ -367,7 +272,7 @@ export default function App() {
       >
         <div className="min-w-0 flex-1">
           <div className="leading-relaxed">
-            {engineMode === 'online' ? 'موتور آنلاین انتخاب شده است.' : voicePack.message}
+            {engineMode === 'online' ? 'MOSS آنلاین: متن برای تولید صدا به Space عمومی Hugging Face فرستاده می‌شود.' : voicePack.message}
             {engineMode === 'offline' && voicePack.stage === 'downloading' && voicePack.total > 0
               ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
               : ''}
@@ -521,7 +426,7 @@ export default function App() {
         {/* 4. Engine Selection */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs px-0.5">
-            <span className="font-semibold text-slate-200">موتور تولید صدا:</span>
+            <span className="font-semibold text-slate-200">آزمون موتور MOSS:</span>
             
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -531,10 +436,10 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'online' ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">آنلاین</span>
+                <span className="font-bold text-xs">MOSS آنلاین</span>
                 {engineMode === 'online' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">با اینترنت</p>
+              <p className="mt-0.5 text-[9px] opacity-70">Space عمومی · ارسال متن</p>
             </button>
             <button
               type="button"
@@ -542,17 +447,17 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'offline' ? 'border-emerald-400/60 bg-emerald-400/10 text-emerald-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">آفلاین</span>
+                <span className="font-bold text-xs">MOSS آفلاین</span>
                 {engineMode === 'offline' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">بدون اینترنت</p>
+              <p className="mt-0.5 text-[9px] opacity-70">ONNX روی گوشی · دانلود اولیه ۷۶۳ مگابایت</p>
             </button>
           </div>
 
         </div>
 
         <div className="rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
-          گوینده: {CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · لحن: {TONES.find((item) => item.id === selectedTone)?.name}
+          {engineMode === 'online' ? 'آنلاین: نمونهٔ صدای فارسی ثابت از Space' : `آفلاین: ${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · صدای مرجع MOSS چندزبانه است؛ لحن قابل تنظیم نیست`}
         </div>
         <button
           type="button"
@@ -583,12 +488,6 @@ export default function App() {
         onDownloadClip={handleDownload}
         onDeleteClip={handleDeleteClip}
         onClearHistory={handleClearHistory}
-          apiKey={geminiApiKey}
-          apiKeyDraft={geminiApiKeyDraft}
-          onApiKeyDraftChange={setGeminiApiKeyDraft}
-          onSaveApiKey={saveApiKey}
-          onTestApiKey={testApiKey}
-          isTestingApiKey={isTestingApiKey}
       />
     </div>
   );

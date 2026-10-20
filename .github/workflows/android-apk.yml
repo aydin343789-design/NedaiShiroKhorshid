@@ -2,9 +2,9 @@ name: Build Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, test/moss-tts-nano]
   pull_request:
-    branches: [main, fix/online-tts-stream-timeout]
+    branches: [main, fix/online-tts-stream-timeout, test/moss-tts-nano]
   workflow_dispatch:
 
 permissions:

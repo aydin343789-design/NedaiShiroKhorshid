@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Play, Download, Trash2, History, Clock, Settings, KeyRound, CheckCircle2, LoaderCircle } from 'lucide-react';
+import { X, Play, Download, Trash2, History, Clock, Settings, Info } from 'lucide-react';
 import { SavedAudioClip } from '../types';
 import { CHARACTERS } from '../data/voices';
 
@@ -11,12 +11,6 @@ interface HistoryDrawerProps {
   onDownloadClip: (clip: SavedAudioClip) => void;
   onDeleteClip: (id: string) => void;
   onClearHistory: () => void;
-  apiKey: string;
-  apiKeyDraft: string;
-  onApiKeyDraftChange: (value: string) => void;
-  onSaveApiKey: () => void;
-  onTestApiKey: () => void;
-  isTestingApiKey: boolean;
 }
 
 export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
@@ -27,12 +21,6 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
   onDownloadClip,
   onDeleteClip,
   onClearHistory,
-  apiKey,
-  apiKeyDraft,
-  onApiKeyDraftChange,
-  onSaveApiKey,
-  onTestApiKey,
-  isTestingApiKey,
 }) => {
   const [activeTab, setActiveTab] = useState<'history' | 'settings'>('history');
   if (!isOpen) return null;
@@ -58,34 +46,19 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
         </div>
 
         {activeTab === 'settings' ? (
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-bold text-white">
-              <KeyRound className="h-4 w-4 text-cyan-300" /> کلید موتور آنلاین
+          <div className="flex-1 space-y-3 overflow-y-auto p-4">
+            <div className="flex items-center gap-2 text-sm font-bold text-white">
+              <Info className="h-4 w-4 text-cyan-300" /> نکات نسخهٔ آزمایشی MOSS
             </div>
-            <label htmlFor="gemini-api-key" className="mb-1.5 block text-xs text-slate-300">کلید API</label>
-            <input
-              id="gemini-api-key"
-              type="password"
-              dir="ltr"
-              autoComplete="off"
-              value={apiKeyDraft}
-              onChange={(event) => onApiKeyDraftChange(event.target.value)}
-              placeholder="کلید API را وارد کنید"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-xs text-slate-100 outline-none focus:border-cyan-400"
-            />
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button type="button" onClick={onSaveApiKey} className="flex items-center justify-center gap-1.5 rounded-xl border border-cyan-400/40 bg-cyan-400/10 px-3 py-2.5 text-xs font-bold text-cyan-100">
-                <CheckCircle2 className="h-4 w-4" /> ذخیره کلید
-              </button>
-              <button type="button" disabled={!apiKey.trim() || isTestingApiKey} onClick={onTestApiKey} className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-xs font-bold text-slate-200 disabled:opacity-50">
-                {isTestingApiKey ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-                {isTestingApiKey ? 'در حال بررسی…' : 'آزمایش اتصال'}
-              </button>
+            <div className="rounded-xl border border-cyan-400/25 bg-cyan-400/5 p-3 text-[11px] leading-6 text-slate-300">
+              <p className="font-bold text-cyan-100">حالت آنلاین</p>
+              <p>درخواست‌ها به Space عمومی OpenMOSS روی Hugging Face ارسال می‌شوند؛ متن و فایل صوتی تولیدشده از گوشی خارج می‌شوند. دسترس‌پذیری و سهمیهٔ Space در اختیار پروژه نیست.</p>
             </div>
-            <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs text-cyan-300 underline">دریافت کلید API</a>
-            <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-              
-            </p>
+            <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/5 p-3 text-[11px] leading-6 text-slate-300">
+              <p className="font-bold text-emerald-100">حالت آفلاین</p>
+              <p>مدل‌های ONNX در اولین بار حدود ۷۶۳ مگابایت دانلود می‌شوند؛ برای دانلود و اجرای مدل حدود ۱٫۸ گیگابایت فضای آزاد پیشنهاد می‌شود. متن در حالت آفلاین روی گوشی می‌ماند.</p>
+              <p className="mt-2">نسخهٔ آفلاین یک اتصال آزمایشی به نمونهٔ رسمی Android است. مدل صوت‌های مرجع فارسی ازپیش‌ساخته‌شده ندارد و ممکن است صدای فارسی با لهجهٔ غیرایرانی باشد؛ کیفیت، سرعت و مصرف حافظه را روی گوشی خودتان بسنجید.</p>
+            </div>
           </div>
         ) : (
           <>

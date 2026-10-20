@@ -1,189 +1,152 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { audioBufferToMp3 } from './neuralPersianTts';
-import type { CharacterId, ToneId } from '../types';
-import type { NeuralAudioResult, SynthesisProgress } from './neuralPersianTts';
+import { audioBufferToMp3, type NeuralAudioResult, type SynthesisProgress } from './neuralPersianTts';
+import { MossOfflineTts } from './mossOfflineTts';
 
-const GEMINI_TTS_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
-const GEMINI_TTS_MODEL = 'gemini-3.8-flash-lite-tts';
-const MAX_TEXT_CHARS = 3500;
+const SPACE = 'https://openmoss-team-moss-tts-nano.hf.space';
+const MAX_TEXT_CHARS = 1800;
+type FileData = { path: string; url?: string; orig_name?: string; mime_type?: string; meta?: { _type: string } };
 
-const VOICE_BY_CHARACTER: Record<CharacterId, string> = {
-  female: 'Kore',
-  male: 'Charon',
-  child: 'Leda',
-  narrator: 'Rasalgethi',
-};
-
-const STYLE_BY_TONE: Record<ToneId, string> = {
-  cheerful: 'Speak in natural Iranian Persian (Farsi), warmly cheerful, lively and smiling, with expressive but clear intonation.',
-  intimate: 'Speak in natural Iranian Persian (Farsi), warmly intimate, gentle, close and friendly, with soft measured pacing.',
-  sad: 'Speak in natural Iranian Persian (Farsi), subdued, heartfelt and sad, with restrained emotion and deliberate pauses. Do not overact.',
-  formal: 'Speak in natural Iranian Persian (Farsi), formal, respectful, measured and clearly articulated.',
-  professional: 'Speak in natural Iranian Persian (Farsi), polished, confident, composed and clear, as for a professional presentation.',
-  newscast: 'Speak in natural Iranian Persian (Farsi) as a professional news presenter: neutral, credible, precise, even-paced, crisp consonants, no theatrical emotion.',
-  epic: 'Speak in natural Iranian Persian (Farsi) as a cinematic narrator: resonant, dignified, powerful and deliberate, with dramatic but controlled pauses.',
-};
-
-function characterDirection(character: CharacterId): string {
-  switch (character) {
-    case 'female':
-      return 'Use a clearly feminine adult voice.';
-    case 'male':
-      return 'Use a clearly masculine adult voice.';
-    case 'child':
-      return 'Use a youthful, childlike, bright voice; keep the words intelligible and avoid caricature.';
-    case 'narrator':
-      return 'Use a mature, deep, steady narrator voice with a storytelling presence.';
-  }
-}
-
-function report(
-  callback: ((progress: SynthesisProgress) => void) | undefined,
-  completed: number,
-  total: number,
-  message: string,
-) {
+function report(callback: ((progress: SynthesisProgress) => void) | undefined, completed: number, total: number, message: string) {
   callback?.({ completed, total, message });
 }
 
-function decodeBase64(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
+async function postGradio(endpoint: string, data: unknown[], sessionHash: string): Promise<string> {
+  const url = `${SPACE}/gradio_api/call/${endpoint}`;
+  const body = { data, session_hash: sessionHash };
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.post({
+      url,
+      headers: { 'Content-Type': 'application/json' },
+      data: body,
+      connectTimeout: 25000,
+      readTimeout: 90000,
+    });
+    if (response.status < 200 || response.status >= 300) throw new Error(`Space rejected request (${response.status}).`);
+    const payload = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+    if (!payload?.event_id) throw new Error('Space did not return a job id.');
+    return String(payload.event_id);
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(90000),
+  });
+  if (!response.ok) throw new Error(`Space rejected request (${response.status}).`);
+  const payload = await response.json() as { event_id?: string };
+  if (!payload.event_id) throw new Error('Space did not return a job id.');
+  return payload.event_id;
 }
 
-function findAudioData(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== 'object') return undefined;
-  const steps = (payload as { steps?: unknown }).steps;
-  if (!Array.isArray(steps)) return undefined;
-  for (let stepIndex = steps.length - 1; stepIndex >= 0; stepIndex -= 1) {
-    const step = steps[stepIndex] as { type?: unknown; content?: unknown };
-    if (step.type !== 'model_output' || !Array.isArray(step.content)) continue;
-    for (let contentIndex = step.content.length - 1; contentIndex >= 0; contentIndex -= 1) {
-      const content = step.content[contentIndex] as { type?: unknown; data?: unknown };
-      if (content.type === 'audio' && typeof content.data === 'string') return content.data;
+async function readGradioEvent(endpoint: string, eventId: string, sessionHash: string): Promise<unknown[]> {
+  const url = `${SPACE}/gradio_api/call/${endpoint}/${encodeURIComponent(eventId)}`;
+  let raw: string;
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.get({
+      url,
+      headers: { Accept: 'text/event-stream' },
+      connectTimeout: 25000,
+      readTimeout: 270000,
+    });
+    raw = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+    if (response.status < 200 || response.status >= 300) throw new Error(`Space job failed (${response.status}).`);
+  } else {
+    const response = await fetch(url, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(270000) });
+    if (!response.ok) throw new Error(`Space job failed (${response.status}).`);
+    raw = await response.text();
+  }
+  for (const block of raw.split(/\r?\n\r?\n/)) {
+    const eventName = block.match(/^event:\s*(.+)$/m)?.[1]?.trim();
+    const dataLine = block.split(/\r?\n/).find((line) => line.startsWith('data:'));
+    if (!dataLine) continue;
+    const content = dataLine.slice(5).trim();
+    if (eventName === 'error') throw new Error(content || 'Space failed to process the request.');
+    if (eventName === 'complete') {
+      try {
+        const result = JSON.parse(content);
+        if (Array.isArray(result)) return result;
+      } catch { /* wait for a complete JSON data event */ }
     }
   }
-  return undefined;
+  throw new Error('Space did not return a completed result. It may be sleeping, busy, or unavailable; please retry.');
 }
 
-/**
- * Expressive Persian online TTS. The user supplies their own Google AI Studio
- * key in the app; no API key is bundled into the public APK or source code.
- */
+async function downloadWave(url: string): Promise<Blob> {
+  let bytes: Uint8Array;
+  if (Capacitor.isNativePlatform()) {
+    const result = await MossOfflineTts.downloadAudio({ url });
+    const raw = atob(result.base64);
+    bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+  } else {
+    const response = await fetch(url, { signal: AbortSignal.timeout(90000) });
+    if (!response.ok) throw new Error(`Could not download generated audio (${response.status}).`);
+    bytes = new Uint8Array(await response.arrayBuffer());
+  }
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return new Blob([copy.buffer], { type: 'audio/wav' });
+}
+
+function fileUrl(file: FileData | undefined): string {
+  if (!file) throw new Error('MOSS Space did not return an audio file.');
+  if (file.url) return file.url.startsWith('http') ? file.url : `${SPACE}${file.url}`;
+  if (file.path) return `${SPACE}/gradio_api/file=${encodeURIComponent(file.path)}`;
+  throw new Error('MOSS Space returned an invalid audio-file reference.');
+}
+
+/** Public MOSS Space online path; Persian demo-21 provides the preset Farsi reference speaker. */
 export async function synthesizePersianOnlineAudio(
   text: string,
-  character: CharacterId,
-  tone: ToneId,
-  speed = 1,
-  apiKey = '',
+  _character: string,
+  _tone: string,
+  _speed = 1,
   callback?: (progress: SynthesisProgress) => void,
 ): Promise<NeuralAudioResult> {
   const cleanText = text.trim();
   if (!cleanText) throw new Error('متنی برای خوانش وارد نشده است.');
-  if (cleanText.length > MAX_TEXT_CHARS) {
-    throw new Error(`برای خوانش آنلاین، متن را به بخش‌های حداکثر ${MAX_TEXT_CHARS} نویسه‌ای تقسیم کنید.`);
-  }
-  if (!apiKey.trim()) throw new Error('برای موتور آنلاین Gemini ابتدا کلید API را در برنامه ذخیره کنید.');
-
-  report(callback, 0, 3, 'اتصال امن به موتور گفتار Gemini…');
-  const speedDirection = speed < 0.9
-    ? 'Speak slowly and distinctly.'
-    : speed > 1.1
-      ? 'Speak briskly but keep every word intelligible.'
-      : 'Use a natural conversational pace.';
-  const style = `${characterDirection(character)} ${STYLE_BY_TONE[tone]} ${speedDirection} Read the supplied Persian text faithfully. Do not translate, summarize, add words, or read these instructions aloud.`;
-
-  const requestBody = {
-    model: GEMINI_TTS_MODEL,
-    input: [{
-      type: 'user_input',
-      content: [{
-        type: 'text',
-        text: cleanText,
-        annotations: [{ type: 'speech_metadata', style }],
-      }],
-    }],
-    response_format: { type: 'audio' },
-    generation_config: {
-      speech_config: [{ voice: VOICE_BY_CHARACTER[character] }],
-    },
-  };
-
-  let responseStatus = 0;
-  let payload: Record<string, unknown> = {};
+  if (cleanText.length > MAX_TEXT_CHARS) throw new Error(`برای این آزمون آنلاین، متن را به حداکثر ${MAX_TEXT_CHARS} نویسه تقسیم کنید.`);
+  const sessionHash = `nedaye-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
-    if (Capacitor.isNativePlatform()) {
-      // Use Android's native HTTP bridge to avoid WebView CORS/preflight failures.
-      const nativeResponse = await CapacitorHttp.post({
-        url: GEMINI_TTS_ENDPOINT,
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey.trim(),
-        },
-        data: requestBody,
-        connectTimeout: 20000,
-        readTimeout: 90000,
-      });
-      responseStatus = nativeResponse.status;
-      const raw = nativeResponse.data;
-      if (typeof raw === 'string') {
-        try { payload = JSON.parse(raw) as Record<string, unknown>; }
-        catch { payload = { message: raw }; }
-      } else if (raw && typeof raw === 'object') {
-        payload = raw as Record<string, unknown>;
-      }
-    } else {
-      const response = await fetch(GEMINI_TTS_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey.trim(),
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(90000),
-      });
-      responseStatus = response.status;
-      payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-    }
+    report(callback, 0, 3, 'اتصال به MOSS Space و بارگیری مرجع فارسی…');
+    const selectId = await postGradio('apply_demo_case_selection', ['demo-21', null], sessionHash);
+    const selection = await readGradioEvent('apply_demo_case_selection', selectId, sessionHash);
+    const referenceAudio = selection[1] as FileData | undefined;
+    if (!referenceAudio?.path && !referenceAudio?.url) throw new Error('صدای مرجع فارسی از Space دریافت نشد.');
+
+    report(callback, 1, 3, 'ارسال متن به MOSS برای تولید گفتار…');
+    const runId = await postGradio('run_inference', [
+      cleanText,
+      referenceAudio,
+      selection[2] ?? null,
+      true,
+      true,
+      300,
+      75,
+      true,
+      1.0,
+      1.0,
+      50,
+      0.8,
+      0.95,
+      25,
+      1.2,
+      0,
+    ], sessionHash);
+    const generated = await readGradioEvent('run_inference', runId, sessionHash);
+    const audioFile = generated[0] as FileData | undefined;
+    report(callback, 2, 3, 'دریافت خروجی WAV و آماده‌سازی MP3…');
+    const wavBlob = await downloadWave(fileUrl(audioFile));
+    const context = new OfflineAudioContext(1, 1, 24000);
+    const decoded = await context.decodeAudioData(await wavBlob.arrayBuffer());
+    const blob = await audioBufferToMp3(decoded);
+    report(callback, 3, 3, 'گفتار MOSS آماده شد.');
+    return { blob, audioUrl: URL.createObjectURL(blob), duration: decoded.duration, mimeType: 'audio/mpeg' };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : '';
-    throw new Error(
-      detail
-        ? `اتصال آنلاین برقرار نشد: ${detail.slice(0, 120)}`
-        : 'اتصال آنلاین برقرار نشد؛ اینترنت، دسترسی API و محدودیت شبکه را بررسی کنید.',
-    );
-  }
-
-  if (responseStatus < 200 || responseStatus >= 300) {
-    const errorObject = payload.error as { message?: unknown } | undefined;
-    const message = typeof errorObject?.message === 'string' ? errorObject.message : '';
-    if (responseStatus === 401 || responseStatus === 403) {
-      const detail = message ? ` — ${message.slice(0, 180)}` : '';
-      throw new Error(`خطای دسترسی Gemini (${responseStatus})${detail}`);
+    const detail = error instanceof Error ? error.message : 'خطای ناشناخته';
+    if (/failed to fetch|network|timeout|connection/i.test(detail)) {
+      throw new Error(`اتصال به MOSS Space برقرار نشد: ${detail.slice(0, 110)}`);
     }
-    if (responseStatus === 429) {
-      throw new Error('سهمیهٔ Gemini فعلاً تمام شده است؛ بعداً دوباره تلاش کنید.');
-    }
-    throw new Error(message || `Gemini درخواست را نپذیرفت (${responseStatus}).`);
+    throw new Error(detail);
   }
-
-  report(callback, 1, 3, 'تولید گفتار با لحن و شخصیت انتخاب‌شده…');
-  const audioBase64 = findAudioData(payload);
-  if (!audioBase64) throw new Error('پاسخ Gemini فایل صوتی قابل‌استفاده نداشت.');
-
-  report(callback, 2, 3, 'آماده‌سازی فایل صوتی MP3…');
-  const wavBytes = decodeBase64(audioBase64);
-  const wavCopy = new Uint8Array(wavBytes.byteLength);
-  wavCopy.set(wavBytes);
-  const wavBlob = new Blob([wavCopy.buffer], { type: 'audio/wav' });
-  const context = new OfflineAudioContext(1, 1, 24000);
-  const decoded = await context.decodeAudioData(await wavBlob.arrayBuffer());
-  const blob = await audioBufferToMp3(decoded);
-  const audioUrl = URL.createObjectURL(blob);
-  const duration = Number.isFinite(decoded.duration) ? decoded.duration : 0;
-
-  report(callback, 3, 3, 'فایل صوتی Gemini آماده است.');
-  return { blob, audioUrl, duration, mimeType: 'audio/mpeg' };
 }
