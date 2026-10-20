@@ -1,6 +1,6 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { SentencePieceProcessor } from '@sctg/sentencepiece-js';
-import type { CharacterId } from '../types';
+import type { CharacterId, LanguageId } from '../types';
 import { audioBufferToMp3, type NeuralAudioResult, type VoicePackProgress } from './neuralPersianTts';
 
 interface MossProgressEvent { completed: number; total: number; message: string }
@@ -16,6 +16,7 @@ interface MossOfflineTtsPlugin {
 export const MossOfflineTts = registerPlugin<MossOfflineTtsPlugin>('MossOfflineTts');
 let tokenizer: SentencePieceProcessor | null = null;
 let tokenizerPromise: Promise<SentencePieceProcessor> | null = null;
+let preparationPromise: Promise<void> | null = null;
 const voiceByCharacter: Record<CharacterId, string> = {
   female: 'Bella',
   male: 'Adam',
@@ -23,7 +24,15 @@ const voiceByCharacter: Record<CharacterId, string> = {
   narrator: 'Weiguo',
 };
 
-export async function prepareMossOfflineVoicePack(
+export function prepareMossOfflineVoicePack(
+  callback?: (progress: VoicePackProgress) => void,
+): Promise<void> {
+  if (preparationPromise) return preparationPromise;
+  preparationPromise = prepareMossOfflineVoicePackOnce(callback);
+  return preparationPromise.finally(() => { preparationPromise = null; });
+}
+
+async function prepareMossOfflineVoicePackOnce(
   callback?: (progress: VoicePackProgress) => void,
 ): Promise<void> {
   const report = (stage: VoicePackProgress['stage'], completed: number, total: number, message: string, error?: string) =>
@@ -41,7 +50,7 @@ export async function prepareMossOfflineVoicePack(
         report('downloading', event.completed, Math.max(event.total, 1), event.message);
       });
       try {
-        report('downloading', 0, 11, 'بارگیری مدل‌های MOSS (حدود ۷۶۳ مگابایت)؛ برنامه را باز نگه دارید…');
+        report('downloading', 0, 11, 'دریافت مدل آفلاین…');
         await MossOfflineTts.prepareModels();
       } finally {
         await listener.remove();
@@ -72,16 +81,19 @@ async function loadTokenizer(): Promise<SentencePieceProcessor> {
 export async function synthesizeMossOfflineAudio(
   text: string,
   character: CharacterId,
+  language: LanguageId,
   callback?: (progress: { completed: number; total: number; message: string }) => void,
 ): Promise<NeuralAudioResult> {
   if (!Capacitor.isNativePlatform()) throw new Error('موتور آفلاین MOSS فقط در APK آزمایشی Android قابل اجراست.');
-  const cleanText = text.trim();
+  const cleanText = normalizeMossText(text, language);
   if (!cleanText) throw new Error('متنی برای خوانش وارد نشده است.');
-  callback?.({ completed: 0, total: 3, message: 'بارگذاری tokenizer آفلاین MOSS…' });
+  callback?.({ completed: 0, total: 3, message: language === 'fa' ? 'آماده‌سازی متن فارسی…' : 'Preparing English text…' });
   const processor = await loadTokenizer();
   const tokenIds = Array.from(processor.encodeIds(cleanText));
-  if (tokenIds.length === 0) throw new Error('متن فارسی به token تبدیل نشد.');
-  if (tokenIds.length > 100) throw new Error(`متن آفلاین MOSS در این نمونه حداکثر ۱۰۰ token باشد (اکنون ${tokenIds.length} token).`);
+  if (tokenIds.length === 0) throw new Error(language === 'fa' ? 'متن فارسی به token تبدیل نشد.' : 'Text could not be tokenized.');
+  if (tokenIds.length > 100) throw new Error(language === 'fa'
+    ? `متن آفلاین MOSS در این نمونه حداکثر ۱۰۰ token باشد (اکنون ${tokenIds.length} token).`
+    : `Offline MOSS is limited to 100 tokens here (currently ${tokenIds.length}).`);
   callback?.({ completed: 1, total: 3, message: `تولید ONNX روی گوشی (${tokenIds.length} token)…` });
   const result = await MossOfflineTts.synthesize({
     textTokenIds: tokenIds,
@@ -100,4 +112,16 @@ export async function synthesizeMossOfflineAudio(
   const blob = await audioBufferToMp3(decoded);
   callback?.({ completed: 3, total: 3, message: `MOSS آفلاین آماده شد (${(result.elapsedMs / 1000).toFixed(1)} ثانیه پردازش).` });
   return { blob, audioUrl: URL.createObjectURL(blob), duration: decoded.duration, mimeType: 'audio/mpeg' };
+}
+
+function normalizeMossText(text: string, language: LanguageId): string {
+  const normalized = text.normalize('NFC').replace(/[\t\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  if (language === 'en') return normalized.replace(/\s+([,.;:!?])/g, '$1').replace(/([,.;:!?])(?=\S)/g, '$1 ');
+  return normalized
+    .replace(/[يى]/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/ـ/g, '')
+    .replace(/[٠-٩]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) + 0x0090))
+    .replace(/\s+([،؛؟!,.])/g, '$1')
+    .replace(/([،؛؟!,.])(?=\S)/g, '$1 ');
 }

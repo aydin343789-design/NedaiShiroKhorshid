@@ -1,6 +1,7 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { audioBufferToMp3, type NeuralAudioResult, type SynthesisProgress } from './neuralPersianTts';
 import { MossOfflineTts } from './mossOfflineTts';
+import type { LanguageId } from '../types';
 
 const SPACE = 'https://openmoss-team-moss-tts-nano.hf.space';
 const MAX_TEXT_CHARS = 1800;
@@ -10,9 +11,11 @@ function report(callback: ((progress: SynthesisProgress) => void) | undefined, c
   callback?.({ completed, total, message });
 }
 
-async function postGradio(endpoint: string, data: unknown[], sessionHash: string): Promise<string> {
+async function postGradio(endpoint: string, data: unknown[]): Promise<string> {
   const url = `${SPACE}/gradio_api/call/${endpoint}`;
-  const body = { data, session_hash: sessionHash };
+  // Gradio creates and tracks its own queue session. Supplying a custom session_hash
+  // makes the public Space return a 404 for the resulting event stream.
+  const body = { data };
   if (Capacitor.isNativePlatform()) {
     const response = await CapacitorHttp.post({
       url,
@@ -21,9 +24,9 @@ async function postGradio(endpoint: string, data: unknown[], sessionHash: string
       connectTimeout: 25000,
       readTimeout: 90000,
     });
-    if (response.status < 200 || response.status >= 300) throw new Error(`Space rejected request (${response.status}).`);
+    if (response.status < 200 || response.status >= 300) throw new Error(`درخواست موتور آنلاین ناموفق بود (${response.status}).`);
     const payload = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-    if (!payload?.event_id) throw new Error('Space did not return a job id.');
+    if (!payload?.event_id) throw new Error('موتور آنلاین درخواست را نپذیرفت.');
     return String(payload.event_id);
   }
   const response = await fetch(url, {
@@ -32,13 +35,13 @@ async function postGradio(endpoint: string, data: unknown[], sessionHash: string
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(90000),
   });
-  if (!response.ok) throw new Error(`Space rejected request (${response.status}).`);
+  if (!response.ok) throw new Error(`درخواست موتور آنلاین ناموفق بود (${response.status}).`);
   const payload = await response.json() as { event_id?: string };
-  if (!payload.event_id) throw new Error('Space did not return a job id.');
+  if (!payload.event_id) throw new Error('موتور آنلاین درخواست را نپذیرفت.');
   return payload.event_id;
 }
 
-async function readGradioEvent(endpoint: string, eventId: string, sessionHash: string): Promise<unknown[]> {
+async function readGradioEvent(endpoint: string, eventId: string): Promise<unknown[]> {
   const url = `${SPACE}/gradio_api/call/${endpoint}/${encodeURIComponent(eventId)}`;
   let raw: string;
   if (Capacitor.isNativePlatform()) {
@@ -49,10 +52,10 @@ async function readGradioEvent(endpoint: string, eventId: string, sessionHash: s
       readTimeout: 270000,
     });
     raw = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
-    if (response.status < 200 || response.status >= 300) throw new Error(`Space job failed (${response.status}).`);
+    if (response.status < 200 || response.status >= 300) throw new Error(`دریافت پاسخ موتور آنلاین ناموفق بود (${response.status}).`);
   } else {
     const response = await fetch(url, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(270000) });
-    if (!response.ok) throw new Error(`Space job failed (${response.status}).`);
+    if (!response.ok) throw new Error(`دریافت پاسخ موتور آنلاین ناموفق بود (${response.status}).`);
     raw = await response.text();
   }
   for (const block of raw.split(/\r?\n\r?\n/)) {
@@ -60,7 +63,12 @@ async function readGradioEvent(endpoint: string, eventId: string, sessionHash: s
     const dataLine = block.split(/\r?\n/).find((line) => line.startsWith('data:'));
     if (!dataLine) continue;
     const content = dataLine.slice(5).trim();
-    if (eventName === 'error') throw new Error(content || 'Space failed to process the request.');
+    if (eventName === 'error') {
+      if (!content || content === 'null') {
+        throw new Error('موتور آنلاین این درخواست را کامل نکرد؛ کمی بعد دوباره تلاش کنید.');
+      }
+      throw new Error(content);
+    }
     if (eventName === 'complete') {
       try {
         const result = JSON.parse(content);
@@ -68,7 +76,7 @@ async function readGradioEvent(endpoint: string, eventId: string, sessionHash: s
       } catch { /* wait for a complete JSON data event */ }
     }
   }
-  throw new Error('Space did not return a completed result. It may be sleeping, busy, or unavailable; please retry.');
+  throw new Error('پاسخ کامل از موتور آنلاین دریافت نشد؛ کمی بعد دوباره تلاش کنید.');
 }
 
 async function downloadWave(url: string): Promise<Blob> {
@@ -89,36 +97,33 @@ async function downloadWave(url: string): Promise<Blob> {
 }
 
 function fileUrl(file: FileData | undefined): string {
-  if (!file) throw new Error('MOSS Space did not return an audio file.');
+  if (!file) throw new Error('موتور آنلاین فایل صوتی برنگرداند.');
   if (file.url) return file.url.startsWith('http') ? file.url : `${SPACE}${file.url}`;
   if (file.path) return `${SPACE}/gradio_api/file=${encodeURIComponent(file.path)}`;
-  throw new Error('MOSS Space returned an invalid audio-file reference.');
+  throw new Error('نشانی فایل صوتی نامعتبر است.');
 }
 
-/** Public MOSS Space online path; Persian demo-21 provides the preset Farsi reference speaker. */
+/** Online MOSS path; the demo endpoints select language-matched test text and its reference audio. */
 export async function synthesizePersianOnlineAudio(
   text: string,
-  _character: string,
-  _tone: string,
-  _speed = 1,
+  language: LanguageId,
   callback?: (progress: SynthesisProgress) => void,
 ): Promise<NeuralAudioResult> {
   const cleanText = text.trim();
   if (!cleanText) throw new Error('متنی برای خوانش وارد نشده است.');
   if (cleanText.length > MAX_TEXT_CHARS) throw new Error(`برای این آزمون آنلاین، متن را به حداکثر ${MAX_TEXT_CHARS} نویسه تقسیم کنید.`);
-  const sessionHash = `nedaye-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
-    report(callback, 0, 3, 'اتصال به MOSS Space و بارگیری مرجع فارسی…');
-    const selectId = await postGradio('apply_demo_case_selection', ['demo-21', null], sessionHash);
-    const selection = await readGradioEvent('apply_demo_case_selection', selectId, sessionHash);
+    report(callback, 0, 3, language === 'fa' ? 'آماده‌سازی صدای فارسی…' : 'Preparing English voice…');
+    const demoId = language === 'fa' ? 'demo-21' : 'demo-9';
+    const selectId = await postGradio('apply_demo_case_selection', [demoId, null]);
+    const selection = await readGradioEvent('apply_demo_case_selection', selectId);
     const referenceAudio = selection[1] as FileData | undefined;
-    if (!referenceAudio?.path && !referenceAudio?.url) throw new Error('صدای مرجع فارسی از Space دریافت نشد.');
+    if (!referenceAudio?.path && !referenceAudio?.url) throw new Error('صدای مرجع انتخاب‌شده دریافت نشد.');
 
-    report(callback, 1, 3, 'ارسال متن به MOSS برای تولید گفتار…');
+    report(callback, 1, 3, language === 'fa' ? 'تولید گفتار فارسی…' : 'Generating English speech…');
     const runId = await postGradio('run_inference', [
       cleanText,
       referenceAudio,
-      selection[2] ?? null,
       true,
       true,
       300,
@@ -132,8 +137,8 @@ export async function synthesizePersianOnlineAudio(
       25,
       1.2,
       0,
-    ], sessionHash);
-    const generated = await readGradioEvent('run_inference', runId, sessionHash);
+    ]);
+    const generated = await readGradioEvent('run_inference', runId);
     const audioFile = generated[0] as FileData | undefined;
     report(callback, 2, 3, 'دریافت خروجی WAV و آماده‌سازی MP3…');
     const wavBlob = await downloadWave(fileUrl(audioFile));
@@ -145,7 +150,7 @@ export async function synthesizePersianOnlineAudio(
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'خطای ناشناخته';
     if (/failed to fetch|network|timeout|connection/i.test(detail)) {
-      throw new Error(`اتصال به MOSS Space برقرار نشد: ${detail.slice(0, 110)}`);
+      throw new Error(`اتصال به موتور آنلاین برقرار نشد: ${detail.slice(0, 110)}`);
     }
     throw new Error(detail);
   }

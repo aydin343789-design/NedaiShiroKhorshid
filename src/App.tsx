@@ -16,8 +16,8 @@ import {
 import { LionSunEmblem } from './components/LionSunEmblem';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { AudioPlayerScreen } from './components/AudioPlayerScreen';
-import { CharacterId, ToneId, SavedAudioClip } from './types';
-import { CHARACTERS, TONES, DEFAULT_SAMPLE_TEXT } from './data/voices';
+import { CharacterId, ToneId, SavedAudioClip, LanguageId } from './types';
+import { CHARACTERS, TONES, DEFAULT_SAMPLE_TEXT, DEFAULT_SAMPLE_TEXT_EN } from './data/voices';
 import { type VoicePackProgress } from './utils/neuralPersianTts';
 import { prepareMossOfflineVoicePack, synthesizeMossOfflineAudio } from './utils/mossOfflineTts';
 import { synthesizePersianOnlineAudio } from './utils/onlinePersianTts';
@@ -39,6 +39,7 @@ export default function App() {
   const [selectedTone, setSelectedTone] = useState<ToneId>('cheerful');
   const [engineMode, setEngineMode] = useState<'offline' | 'online'>('online');
   const [text, setText] = useState<string>(DEFAULT_SAMPLE_TEXT);
+  const [language, setLanguage] = useState<LanguageId>('fa');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [activeClip, setActiveClip] = useState<SavedAudioClip | null>(null);
   const [history, setHistory] = useState<SavedAudioClip[]>([]);
@@ -49,7 +50,7 @@ export default function App() {
     stage: 'idle',
     completed: 0,
     total: 1,
-    message: 'MOSS آفلاین به دانلود اولیهٔ حدود ۷۶۳ مگابایت نیاز دارد.',
+    message: 'مدل آفلاین آماده نیست.',
   });
   const [generationMessage, setGenerationMessage] = useState('');
 
@@ -73,17 +74,27 @@ export default function App() {
       stage: 'checking',
       completed: 0,
       total: 1,
-      message: 'بررسی بستهٔ صدای آفلاین انتخاب‌شده…',
+      message: 'بررسی مدل آفلاین…',
     });
     void prepareMossOfflineVoicePack(setVoicePack).catch((error) => {
       console.error('MOSS offline preparation failed:', error);
     });
   };
 
-  // Voice models are acquired once on the first launch and persist in local cache.
+  // All character profiles share one app-wide model pack. Character selection must not restart setup.
   useEffect(() => {
     if (engineMode === 'offline') prepareVoicePack();
-  }, [engineMode, selectedCharacter]);
+  }, [engineMode]);
+
+  const selectLanguage = (next: LanguageId) => {
+    setLanguage(next);
+    setText((current) => {
+      if (current === DEFAULT_SAMPLE_TEXT || current === DEFAULT_SAMPLE_TEXT_EN) {
+        return next === 'fa' ? DEFAULT_SAMPLE_TEXT : DEFAULT_SAMPLE_TEXT_EN;
+      }
+      return current;
+    });
+  };
 
   const saveHistory = (items: SavedAudioClip[]) => {
     setHistory(items);
@@ -111,31 +122,24 @@ export default function App() {
     }
     try {
       setIsGenerating(true);
-      setGenerationMessage(engineMode === 'online' ? 'در حال اتصال به MOSS Space…' : 'در حال اجرای MOSS روی گوشی…');
+      setGenerationMessage(engineMode === 'online' ? 'در حال آماده‌سازی موتور آنلاین…' : 'در حال اجرای MOSS روی گوشی…');
       const cleanText = text.trim();
       const charObj = CHARACTERS.find((c) => c.id === selectedCharacter);
       const toneObj = TONES.find((t) => t.id === selectedTone);
       const synth = engineMode === 'online'
-        ? await synthesizePersianOnlineAudio(
-            cleanText,
-            selectedCharacter,
-            selectedTone,
-            speed,
-            (progress) => setGenerationMessage(progress.message),
-          )
-        : await synthesizeMossOfflineAudio(cleanText, selectedCharacter, (progress) => setGenerationMessage(progress.message));
+        ? await synthesizePersianOnlineAudio(cleanText, language, (progress) => setGenerationMessage(progress.message))
+        : await synthesizeMossOfflineAudio(cleanText, selectedCharacter, language, (progress) => setGenerationMessage(progress.message));
       const usedEngine: 'online' | 'offline' = engineMode;
       const characterName = engineMode === 'online'
-        ? 'MOSS آنلاین · صدای مرجع فارسی'
-        : `MOSS آفلاین · ${charObj?.name || 'گوینده'} (صدای چندزبانهٔ آزمایشی)`;
-      const toneName = engineMode === 'online'
-        ? 'لحن ثابت نمونهٔ فارسی'
-        : `لحن ثابت مدل · انتخاب «${toneObj?.name || 'طبیعی'}» در MOSS اعمال نمی‌شود`;
+        ? 'MOSS آنلاین'
+        : `MOSS آفلاین · ${charObj?.name || 'گوینده'}`;
+      const toneName = toneObj?.name || 'پیش‌فرض';
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
       const newClip: SavedAudioClip = {
         id: `clip-${Date.now()}`,
         text: text.trim(),
+        language,
         character: selectedCharacter,
         characterName,
         tone: selectedTone,
@@ -188,6 +192,10 @@ export default function App() {
 
   const handleSelectClipFromHistory = (clip: SavedAudioClip) => {
     setActiveClip(clip);
+    setLanguage(clip.language ?? 'fa');
+    setText(clip.text);
+    setSelectedCharacter(clip.character);
+    setSelectedTone(clip.tone);
     setCurrentScreen('player');
   };
 
@@ -259,7 +267,8 @@ export default function App() {
         </button>
       </header>
 
-      {/* Offline model download status and progress must remain visible. */}
+      {/* Progress is shown only while the shared offline model is being prepared. */}
+      {engineMode === 'offline' && voicePack.stage !== 'idle' && (
       <section
         className={`mx-auto mt-2 flex w-full max-w-xl items-center justify-between gap-3 rounded-xl border px-3 py-2 text-[11px] sm:text-xs ${
           voicePack.stage === 'ready'
@@ -272,7 +281,7 @@ export default function App() {
       >
         <div className="min-w-0 flex-1">
           <div className="leading-relaxed">
-            {engineMode === 'online' ? 'MOSS آنلاین: متن برای تولید صدا به Space عمومی Hugging Face فرستاده می‌شود.' : voicePack.message}
+            {voicePack.message}
             {engineMode === 'offline' && voicePack.stage === 'downloading' && voicePack.total > 0
               ? ` (${Math.min(100, Math.round((voicePack.completed / voicePack.total) * 100))}%)`
               : ''}
@@ -294,6 +303,7 @@ export default function App() {
           <span className="shrink-0 font-bold text-emerald-300">آماده</span>
         ) : null}
       </section>
+      )}
 
       {/* Main Workspace */}
       <main className="flex flex-1 flex-col justify-between py-2 max-w-xl mx-auto w-full gap-2.5">
@@ -387,11 +397,15 @@ export default function App() {
         {/* 3. Text Box with 1 default sample */}
         <div className="flex flex-1 flex-col space-y-1.5 min-h-[130px]">
           <div className="flex items-center justify-between text-xs px-0.5">
-            <span className="font-semibold text-slate-200">متن فارسی:</span>
+            <span className="font-semibold text-slate-200">متن {language === 'fa' ? 'فارسی' : 'English'}:</span>
             <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-lg border border-slate-800 bg-slate-900/80 p-0.5">
+                <button type="button" onClick={() => selectLanguage('fa')} className={`rounded-md px-2 py-1 text-[10px] font-semibold ${language === 'fa' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400'}`}>فارسی</button>
+                <button type="button" onClick={() => selectLanguage('en')} className={`rounded-md px-2 py-1 text-[10px] font-semibold ${language === 'en' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400'}`}>English</button>
+              </div>
               <button
                 type="button"
-                onClick={() => setText(DEFAULT_SAMPLE_TEXT)}
+                onClick={() => setText(language === 'fa' ? DEFAULT_SAMPLE_TEXT : DEFAULT_SAMPLE_TEXT_EN)}
                 className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-medium"
                 title="بارگذاری مجدد متن نمونه"
               >
@@ -411,10 +425,10 @@ export default function App() {
 
           <div className="relative flex-1 rounded-2xl border border-slate-800 bg-slate-950/90 p-3 shadow-inner focus-within:border-amber-500/60 transition-colors">
             <textarea
-              dir="rtl"
+              dir={language === 'fa' ? 'rtl' : 'ltr'}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="متن خود را اینجا بنویسید..."
+              placeholder={language === 'fa' ? 'متن فارسی خود را اینجا بنویسید...' : 'Type English text here...'}
               className="h-full w-full resize-none bg-transparent text-xs sm:text-sm leading-relaxed text-slate-100 placeholder-slate-600 outline-none"
             />
             <span className="pointer-events-none absolute bottom-2 left-3 text-[10px] text-slate-600">
@@ -439,7 +453,7 @@ export default function App() {
                 <span className="font-bold text-xs">MOSS آنلاین</span>
                 {engineMode === 'online' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">Space عمومی · ارسال متن</p>
+              <p className="mt-0.5 text-[9px] opacity-70">فارسی و English</p>
             </button>
             <button
               type="button"
@@ -450,15 +464,12 @@ export default function App() {
                 <span className="font-bold text-xs">MOSS آفلاین</span>
                 {engineMode === 'offline' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">ONNX روی گوشی · دانلود اولیه ۷۶۳ مگابایت</p>
+              <p className="mt-0.5 text-[9px] opacity-70">پردازش روی گوشی</p>
             </button>
           </div>
 
         </div>
 
-        <div className="rounded-xl border border-slate-800/80 bg-slate-900/45 px-3 py-2 text-[10px] text-slate-400">
-          {engineMode === 'online' ? 'آنلاین: نمونهٔ صدای فارسی ثابت از Space' : `آفلاین: ${CHARACTERS.find((item) => item.id === selectedCharacter)?.name} · صدای مرجع MOSS چندزبانه است؛ لحن قابل تنظیم نیست`}
-        </div>
         <button
           type="button"
           disabled={isGenerating || !text.trim() || (engineMode === 'offline' && voicePack.stage !== 'ready')}

@@ -56,8 +56,8 @@ run('npx', ['capacitor-assets', 'generate', '--android', '--assetPath', 'resourc
 
 const gradleFile = 'android/app/build.gradle';
 let gradle = readFileSync(gradleFile, 'utf8');
-gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode 7');
-gradle = gradle.replace(/versionName\s+"[^"]+"/, 'versionName "2.4.0-moss-test"');
+gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode 8');
+gradle = gradle.replace(/versionName\s+"[^"]+"/, 'versionName "2.4.1-moss-test"');
 
 // CI can provide a persistent private keystore through GitHub Actions secrets.
 // Never commit that keystore or its passwords to the repository. If the

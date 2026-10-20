@@ -67,7 +67,7 @@ class MossOfflineTtsPlugin : Plugin() {
                         connectTimeout = 30000
                         readTimeout = 120000
                         instanceFollowRedirects = true
-                        setRequestProperty("User-Agent", "NedayeShiroKhorshid-Android/2.4.0")
+                        setRequestProperty("User-Agent", "NedayeShiroKhorshid-Android/2.4.1")
                     }
                     try {
                         val status = connection.responseCode
@@ -127,7 +127,7 @@ class MossOfflineTtsPlugin : Plugin() {
         val voice = call.getString("voice") ?: "Bella"
         val maxFrames = call.getInt("maxFrames") ?: 300
         if (tokenArray == null || tokenArray.length() == 0) {
-            call.reject("متن فارسی به شناسه‌های tokenizer تبدیل نشد.")
+            call.reject("متن به شناسه‌های tokenizer تبدیل نشد.")
             return
         }
         worker.execute {
@@ -167,7 +167,7 @@ class MossOfflineTtsPlugin : Plugin() {
                     connectTimeout = 30000
                     readTimeout = 180000
                     instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "NedayeShiroKhorshid-Android/2.4.0")
+                    setRequestProperty("User-Agent", "NedayeShiroKhorshid-Android/2.4.1")
                 }
                 val bytes = try {
                     if (connection.responseCode !in 200..299) throw IllegalStateException("دریافت فایل صوتی MOSS ناموفق بود (HTTP ${connection.responseCode}).")

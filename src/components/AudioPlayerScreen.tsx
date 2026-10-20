@@ -218,7 +218,7 @@ export const AudioPlayerScreen: React.FC<AudioPlayerScreenProps> = ({
                     لحن: {clip.toneName}
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-slate-300 truncate font-mono">
+                <p dir={clip.language === 'en' ? 'ltr' : 'rtl'} className={`mt-1 text-xs text-slate-300 truncate font-mono ${clip.language === 'en' ? 'text-left' : 'text-right'}`}>
                   {clip.text}
                 </p>
               </div>

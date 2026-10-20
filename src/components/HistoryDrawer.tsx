@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Play, Download, Trash2, History, Clock, Settings, Info } from 'lucide-react';
+import React from 'react';
+import { X, Play, Download, Trash2, History, Clock } from 'lucide-react';
 import { SavedAudioClip } from '../types';
 import { CHARACTERS } from '../data/voices';
 
@@ -22,7 +22,6 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
   onDeleteClip,
   onClearHistory,
 }) => {
-  const [activeTab, setActiveTab] = useState<'history' | 'settings'>('history');
   if (!isOpen) return null;
 
   return (
@@ -30,39 +29,13 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
       <button aria-label="بستن منو" className="fixed inset-0 cursor-default" onClick={onClose} />
       <div className="relative z-10 flex h-full w-full max-w-sm flex-col border-r border-amber-500/20 bg-[#0c1017] shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-800/80 bg-slate-950/80 px-4 py-3.5">
-          <h3 className="font-bold text-sm text-white">منو</h3>
+          <h3 className="font-bold text-sm text-white">تاریخچه</h3>
           <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-slate-400 hover:text-white" aria-label="بستن">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 border-b border-slate-800 p-3">
-          <button type="button" onClick={() => setActiveTab('history')} className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold ${activeTab === 'history' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'border border-slate-800 text-slate-400'}`}>
-            <History className="h-4 w-4" /> تاریخچه
-          </button>
-          <button type="button" onClick={() => setActiveTab('settings')} className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold ${activeTab === 'settings' ? 'bg-cyan-500/15 text-cyan-200 border border-cyan-500/30' : 'border border-slate-800 text-slate-400'}`}>
-            <Settings className="h-4 w-4" /> تنظیمات
-          </button>
-        </div>
-
-        {activeTab === 'settings' ? (
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
-              <Info className="h-4 w-4 text-cyan-300" /> نکات نسخهٔ آزمایشی MOSS
-            </div>
-            <div className="rounded-xl border border-cyan-400/25 bg-cyan-400/5 p-3 text-[11px] leading-6 text-slate-300">
-              <p className="font-bold text-cyan-100">حالت آنلاین</p>
-              <p>درخواست‌ها به Space عمومی OpenMOSS روی Hugging Face ارسال می‌شوند؛ متن و فایل صوتی تولیدشده از گوشی خارج می‌شوند. دسترس‌پذیری و سهمیهٔ Space در اختیار پروژه نیست.</p>
-            </div>
-            <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/5 p-3 text-[11px] leading-6 text-slate-300">
-              <p className="font-bold text-emerald-100">حالت آفلاین</p>
-              <p>مدل‌های ONNX در اولین بار حدود ۷۶۳ مگابایت دانلود می‌شوند؛ برای دانلود و اجرای مدل حدود ۱٫۸ گیگابایت فضای آزاد پیشنهاد می‌شود. متن در حالت آفلاین روی گوشی می‌ماند.</p>
-              <p className="mt-2">نسخهٔ آفلاین یک اتصال آزمایشی به نمونهٔ رسمی Android است. مدل صوت‌های مرجع فارسی ازپیش‌ساخته‌شده ندارد و ممکن است صدای فارسی با لهجهٔ غیرایرانی باشد؛ کیفیت، سرعت و مصرف حافظه را روی گوشی خودتان بسنجید.</p>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="flex-1 space-y-2.5 overflow-y-auto p-3">
+        <div className="flex-1 space-y-2.5 overflow-y-auto p-3">
               {history.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center gap-2 text-center text-slate-500">
                   <History className="h-10 w-10 stroke-[1.5] text-slate-600" />
@@ -82,7 +55,7 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
                           <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">{item.toneName}</span>
                           <span className="mr-auto flex items-center gap-1 font-mono text-[10px] text-slate-400"><Clock className="h-2.5 w-2.5" />{item.createdAt}</span>
                         </div>
-                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-300">{item.text}</p>
+                        <p dir={item.language === 'en' ? 'ltr' : 'rtl'} className={`mt-1 line-clamp-2 text-xs leading-relaxed text-slate-300 ${item.language === 'en' ? 'text-left' : 'text-right'}`}>{item.text}</p>
                       </div>
                     </div>
                     <div className="mt-2.5 flex items-center justify-between border-t border-slate-800/60 pt-2 text-xs">
@@ -97,14 +70,12 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
                   </div>
                 );
               })}
-            </div>
-            {history.length > 0 && <div className="border-t border-slate-800/80 bg-slate-950/80 p-3">
+        </div>
+        {history.length > 0 && <div className="border-t border-slate-800/80 bg-slate-950/80 p-3">
               <button type="button" onClick={onClearHistory} className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/20">
                 <Trash2 className="h-3.5 w-3.5" /> <span>پاک‌سازی تمام تاریخچه</span>
               </button>
-            </div>}
-          </>
-        )}
+        </div>}
       </div>
     </div>
   );
