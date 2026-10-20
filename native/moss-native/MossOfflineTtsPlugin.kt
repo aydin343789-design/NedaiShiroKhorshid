@@ -57,7 +57,7 @@ class MossOfflineTtsPlugin : Plugin() {
                 files.forEachIndexed { index, asset ->
                     val target = File(asset.dir, asset.name)
                     if (target.isFile && target.length() > 0) {
-                        emitProgress(index + 1, files.size, "بررسی‌شده: ${asset.name}")
+                        emitProgress((index + 1).toDouble(), files.size, "بررسی‌شده: ${asset.name}")
                         return@forEachIndexed
                     }
                     val part = File(asset.dir, asset.name + ".part")
@@ -99,12 +99,12 @@ class MossOfflineTtsPlugin : Plugin() {
                     } finally {
                         connection.disconnect()
                     }
-                    emitProgress(index + 1, files.size, "دریافت شد: ${asset.name}")
+                    emitProgress((index + 1).toDouble(), files.size, "دریافت شد: ${asset.name}")
                 }
-                emitProgress(files.size, files.size, "مدل MOSS آماده است.")
+                emitProgress(files.size.toDouble(), files.size, "مدل MOSS آماده است.")
                 call.resolve(JSObject().put("ready", true))
             } catch (error: Throwable) {
-                call.reject(error.message ?: "بارگیری مدل MOSS ناموفق بود.", error)
+                rejectWithError(call, error, "بارگیری مدل MOSS ناموفق بود.")
             }
         }
     }
@@ -117,7 +117,7 @@ class MossOfflineTtsPlugin : Plugin() {
             val encoded = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
             call.resolve(JSObject().put("base64", encoded))
         } catch (error: Throwable) {
-            call.reject(error.message ?: "بارگیری tokenizer ناموفق بود.", error)
+            rejectWithError(call, error, "بارگیری tokenizer ناموفق بود.")
         }
     }
 
@@ -149,7 +149,7 @@ class MossOfflineTtsPlugin : Plugin() {
                     .put("elapsedMs", result.elapsedMs)
                     .put("sampleRate", result.sampleRate))
             } catch (error: Throwable) {
-                call.reject(error.message ?: "تولید صوت آفلاین MOSS ناموفق بود.", error)
+                rejectWithError(call, error, "تولید صوت آفلاین MOSS ناموفق بود.")
             }
         }
     }
@@ -175,7 +175,7 @@ class MossOfflineTtsPlugin : Plugin() {
                 } finally { connection.disconnect() }
                 call.resolve(JSObject().put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP)))
             } catch (error: Throwable) {
-                call.reject(error.message ?: "دریافت فایل صوتی آنلاین ناموفق بود.", error)
+                rejectWithError(call, error, "دریافت فایل صوتی آنلاین ناموفق بود.")
             }
         }
     }
@@ -185,6 +185,11 @@ class MossOfflineTtsPlugin : Plugin() {
             .put("completed", completedFiles.coerceIn(0.0, totalFiles.toDouble()))
             .put("total", totalFiles)
             .put("message", message))
+    }
+
+    private fun rejectWithError(call: PluginCall, error: Throwable, fallback: String) {
+        val exception = error as? Exception ?: RuntimeException(error)
+        call.reject(error.message ?: fallback, exception)
     }
 
     private fun formatMb(bytes: Long): String = String.format("%.1f", bytes / (1024.0 * 1024.0))
