@@ -2,9 +2,9 @@ name: Build Android APK
 
 on:
   push:
-    branches: [main, test/moss-tts-nano]
+    branches: [main, test/piper-tts]
   pull_request:
-    branches: [main, fix/online-tts-stream-timeout, test/moss-tts-nano]
+    branches: [main, fix/online-tts-stream-timeout, test/piper-tts]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build-apk:
-    name: Build Android APK — Hybrid TTS
+    name: Build Android APK — Piper test
     runs-on: ubuntu-latest
 
     steps:

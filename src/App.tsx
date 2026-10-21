@@ -12,15 +12,14 @@ import {
   Briefcase,
   Flame,
   Radio,
+  Download,
 } from 'lucide-react';
 import { LionSunEmblem } from './components/LionSunEmblem';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { AudioPlayerScreen } from './components/AudioPlayerScreen';
 import { CharacterId, ToneId, SavedAudioClip, LanguageId } from './types';
 import { CHARACTERS, TONES, DEFAULT_SAMPLE_TEXT, DEFAULT_SAMPLE_TEXT_EN } from './data/voices';
-import { type VoicePackProgress } from './utils/neuralPersianTts';
-import { prepareMossOfflineVoicePack, synthesizeMossOfflineAudio } from './utils/mossOfflineTts';
-import { synthesizePersianOnlineAudio } from './utils/onlinePersianTts';
+import { checkPiperVoice, preparePiperVoice, synthesizePiperOfflineAudio, type VoicePackProgress } from './utils/piperOfflineTts';
 
 const STORAGE_KEY = 'nedaye_shirokhorshid_history_v4';
 
@@ -37,7 +36,7 @@ const TONE_ICONS: Record<ToneId, React.ReactNode> = {
 export default function App() {
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterId>('female');
   const [selectedTone, setSelectedTone] = useState<ToneId>('cheerful');
-  const [engineMode, setEngineMode] = useState<'offline' | 'online'>('online');
+  const [engineMode, setEngineMode] = useState<'offline' | 'online'>('offline');
   const [text, setText] = useState<string>(DEFAULT_SAMPLE_TEXT);
   const [language, setLanguage] = useState<LanguageId>('fa');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -73,18 +72,34 @@ export default function App() {
     setVoicePack({
       stage: 'checking',
       completed: 0,
-      total: 1,
-      message: 'بررسی مدل آفلاین…',
+      total: 100,
+      message: 'بررسی صدای Piper…',
     });
-    void prepareMossOfflineVoicePack(setVoicePack).catch((error) => {
-      console.error('MOSS offline preparation failed:', error);
+    void preparePiperVoice(selectedCharacter, setVoicePack).catch((error) => {
+      console.error('Piper voice preparation failed:', error);
     });
   };
 
-  // All character profiles share one app-wide model pack. Character selection must not restart setup.
+  // Check only the selected Piper voice; never start a large download on mode change.
   useEffect(() => {
-    if (engineMode === 'offline') prepareVoicePack();
-  }, [engineMode]);
+    if (engineMode !== 'offline') return;
+    let active = true;
+    setVoicePack({ stage: 'checking', completed: 0, total: 100, message: 'بررسی صدای Piper…' });
+    void checkPiperVoice(selectedCharacter).then((ready) => {
+      if (!active) return;
+      setVoicePack({
+        stage: ready ? 'ready' : 'idle',
+        completed: ready ? 100 : 0,
+        total: 100,
+        message: ready ? 'صدای آفلاین آماده است.' : `برای استفاده آفلاین، صدای ${CHARACTERS.find((c) => c.id === selectedCharacter)?.name || 'گوینده'} را یک‌بار دانلود کنید.`,
+      });
+    }).catch((error) => {
+      if (!active) return;
+      const message = error instanceof Error ? error.message : 'بررسی صدای Piper ناموفق بود.';
+      setVoicePack({ stage: 'error', completed: 0, total: 100, message, error: message });
+    });
+    return () => { active = false; };
+  }, [engineMode, selectedCharacter]);
 
   const selectLanguage = (next: LanguageId) => {
     setLanguage(next);
@@ -110,29 +125,33 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 4500);
   };
 
-  // MOSS paths are intentionally tested independently; no silent engine fallback.
+  // Online and offline are kept separate; never silently fall back to another voice.
   const handleGenerateAudio = async (speed: number = 1.0, pitch: number = 1.0) => {
     if (!text.trim()) {
       showToast('لطفاً متنی را وارد کنید.');
       return;
     }
     if (engineMode === 'offline' && voicePack.stage !== 'ready') {
-      showToast(voicePack.error || 'ابتدا مدل MOSS آفلاین را دانلود کنید.');
+      showToast(voicePack.error || 'ابتدا صدای Piper آفلاین را دانلود کنید.');
+      return;
+    }
+    if (engineMode === 'offline' && language !== 'fa') {
+      showToast('صداهای آفلاین فایل پیوست فقط برای فارسی هستند؛ برای انگلیسی حالت آنلاین را انتخاب کنید.');
+      return;
+    }
+    if (engineMode === 'online') {
+      showToast('سرویس آنلاین هنوز منتشر نشده است؛ فعلاً از Piper آفلاین استفاده کنید.');
       return;
     }
     try {
       setIsGenerating(true);
-      setGenerationMessage(engineMode === 'online' ? 'در حال آماده‌سازی موتور آنلاین…' : 'در حال اجرای MOSS روی گوشی…');
+      setGenerationMessage('در حال اجرای Piper روی گوشی…');
       const cleanText = text.trim();
       const charObj = CHARACTERS.find((c) => c.id === selectedCharacter);
       const toneObj = TONES.find((t) => t.id === selectedTone);
-      const synth = engineMode === 'online'
-        ? await synthesizePersianOnlineAudio(cleanText, language, (progress) => setGenerationMessage(progress.message))
-        : await synthesizeMossOfflineAudio(cleanText, selectedCharacter, language, (progress) => setGenerationMessage(progress.message));
-      const usedEngine: 'online' | 'offline' = engineMode;
-      const characterName = engineMode === 'online'
-        ? 'MOSS آنلاین'
-        : `MOSS آفلاین · ${charObj?.name || 'گوینده'}`;
+      const synth = await synthesizePiperOfflineAudio(cleanText, selectedCharacter, selectedTone, (progress) => setGenerationMessage(progress.message));
+      const usedEngine: 'online' | 'offline' = 'offline';
+      const characterName = `Piper آفلاین · ${charObj?.name || 'گوینده'}`;
       const toneName = toneObj?.name || 'پیش‌فرض';
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -155,7 +174,7 @@ export default function App() {
       setActiveClip(newClip);
       setCurrentScreen('player');
     } catch (err) {
-      console.error('MOSS synthesis failed:', err);
+      console.error('Speech synthesis failed:', err);
       const reason = err instanceof Error ? err.message : 'خطای ناشناخته';
       showToast(reason.length > 130 ? `${reason.slice(0, 127)}…` : reason);
     } finally {
@@ -267,8 +286,8 @@ export default function App() {
         </button>
       </header>
 
-      {/* Progress is shown only while the shared offline model is being prepared. */}
-      {engineMode === 'offline' && voicePack.stage !== 'idle' && (
+      {/* Download progress/status for the selected offline voice. */}
+      {engineMode === 'offline' && (
       <section
         className={`mx-auto mt-2 flex w-full max-w-xl items-center justify-between gap-3 rounded-xl border px-3 py-2 text-[11px] sm:text-xs ${
           voicePack.stage === 'ready'
@@ -298,6 +317,10 @@ export default function App() {
         {engineMode === 'offline' && voicePack.stage === 'error' ? (
           <button type="button" onClick={prepareVoicePack} className="shrink-0 rounded-lg border border-rose-300/50 px-2 py-1 font-bold text-rose-100">
             تلاش دوباره
+          </button>
+        ) : engineMode === 'offline' && voicePack.stage === 'idle' ? (
+          <button type="button" onClick={prepareVoicePack} className="flex shrink-0 items-center gap-1 rounded-lg border border-emerald-300/50 px-2 py-1 font-bold text-emerald-100">
+            <Download className="h-3 w-3" /> دریافت صدا
           </button>
         ) : engineMode === 'offline' && voicePack.stage === 'ready' ? (
           <span className="shrink-0 font-bold text-emerald-300">آماده</span>
@@ -440,7 +463,7 @@ export default function App() {
         {/* 4. Engine Selection */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs px-0.5">
-            <span className="font-semibold text-slate-200">آزمون موتور MOSS:</span>
+            <span className="font-semibold text-slate-200">موتور صوت:</span>
             
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -450,10 +473,10 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'online' ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">MOSS آنلاین</span>
+                <span className="font-bold text-xs">Edge آنلاین</span>
                 {engineMode === 'online' && <Check className="h-3.5 w-3.5" />}
               </div>
-              <p className="mt-0.5 text-[9px] opacity-70">فارسی و English</p>
+              <p className="mt-0.5 text-[9px] opacity-70">سرویس آنلاین آماده نیست</p>
             </button>
             <button
               type="button"
@@ -461,7 +484,7 @@ export default function App() {
               className={`rounded-xl border px-3 py-2 text-right transition-all ${engineMode === 'offline' ? 'border-emerald-400/60 bg-emerald-400/10 text-emerald-200' : 'border-slate-800 bg-slate-900/60 text-slate-400'}`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">MOSS آفلاین</span>
+                <span className="font-bold text-xs">Piper آفلاین</span>
                 {engineMode === 'offline' && <Check className="h-3.5 w-3.5" />}
               </div>
               <p className="mt-0.5 text-[9px] opacity-70">پردازش روی گوشی</p>

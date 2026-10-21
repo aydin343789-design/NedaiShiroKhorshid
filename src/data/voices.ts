@@ -64,4 +64,4 @@ export const DEFAULT_SAMPLE_TEXT =
   'ای ایران ای مرز پرگهر، ای خاکت سرچشمه هنر، دور از تو اندیشه بدان، پاینده مانی و جاودان.';
 
 export const DEFAULT_SAMPLE_TEXT_EN =
-  'Good evening. This is a short English speech test for the MOSS text-to-speech engine.';
+  'Good evening. This is a short English speech test for the online voice engine.';
